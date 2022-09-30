@@ -1,0 +1,6 @@
+venv/
+*.json
+*.sdf
+.idea/
+__pycache__/
+test.py
