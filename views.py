@@ -7,6 +7,8 @@ from PyQt5.QtWidgets import QApplication, QWidget, QListWidget, QVBoxLayout, QHB
     QLabel, QStackedLayout, QMenu, QMainWindow, QAction, QFileDialog, QLayout
 from PyQt5.QtGui import QIcon
 
+import main
+
 # from PySide2.QtCore import *
 # from PySide2.QtWidgets import *
 
@@ -21,10 +23,224 @@ WORK_TODAY = 'work_today'
 ACTIVE_TASK = 'active_task'
 NAME = 'name'
 
+import os.path
+import pickle
+import sys
+
+import pandas as pd
+from PyQt5.QtWidgets import (QApplication, QWidget, QPushButton, QLabel, QLineEdit, QGridLayout, QMessageBox, QCheckBox)
+from qtwidgets import PasswordEdit
+
+import db_models
+from db import create_db_connection
+
+REMEMBER_ME_FILE_PATH = './env/user.pkl'
+
+
+class QClickableLabel(QLabel):
+    def __init__(self, msg, whenClicked, parent=None):
+        QLabel.__init__(
+            self,
+            msg,
+            parent=parent
+        )
+        self._whenClicked = whenClicked
+
+    def mouseReleaseEvent(self, event):
+        self._whenClicked(event)
+
+
+class ForgetPasswordForm(QWidget):
+    """
+    This "window" is a QWidget. If it has no parent, it
+    will appear as a free-floating window as we want.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__()
+        self.login_form = None
+        self.parent = parent
+        self.setWindowTitle('Forget Password Form')
+        self.resize(500, 300)
+
+        layout = QGridLayout()
+
+        label_name = QLabel('<font size="4"> Email </font>')
+        layout.addWidget(label_name, 0, 0)
+
+        self.lineEdit_username = QLineEdit()
+        self.lineEdit_username.setPlaceholderText('Please enter your Email')
+        layout.addWidget(self.lineEdit_username, 0, 1, )
+
+        button_login = QPushButton('Check')
+        button_login.clicked.connect(self.check_password)
+        layout.addWidget(button_login, 1, 0, 1, 1)
+
+        button_login = QPushButton('Back')
+        button_login.clicked.connect(self.return_to_login_page)
+        layout.addWidget(button_login, 1, 2, )
+
+        layout.setRowMinimumHeight(10, 75)
+        layout.setContentsMargins(65, 65, 65, 65)
+        self.setLayout(layout)
+
+    def check_password(self):
+        print('Do something')
+        pass
+
+    def return_to_login_page(self):
+        self.parent.show()
+        self.hide()
+        self.destroy()
+        # self = None
+        del self
+        pass
+
+
+class LoginForm(QWidget):
+    def __init__(self, ):
+        super().__init__()
+        self.forget_password_form = None
+        self.main_screen = None
+        self.setWindowTitle('Login Form')
+        self.resize(500, 300)
+
+        layout = QGridLayout()
+
+        label_name = QLabel('<font size="4"> Username </font>')
+        self.lineEdit_username = QLineEdit()
+        self.lineEdit_username.setPlaceholderText('Please enter your username')
+        layout.addWidget(label_name, 0, 0)
+        layout.addWidget(self.lineEdit_username, 0, 2, )
+
+        label_password = QLabel('<font size="4"> Password </font>')
+        self.lineEdit_password = PasswordEdit()
+        self.lineEdit_password.setEchoMode(QLineEdit.Password)
+        self.lineEdit_password.setPlaceholderText('Please enter your password')
+        layout.addWidget(label_password, 1, 0)
+        layout.addWidget(self.lineEdit_password, 1, 2, )
+
+        self.remember_me = QCheckBox('Remember me')
+        layout.addWidget(self.remember_me, 2, 0)
+
+        label_forget_password = QClickableLabel('<font size="3"> Forget Password? </font>', self.forget_password, )
+        layout.addWidget(label_forget_password, 2, 2)
+
+        button_login = QPushButton('Login')
+        button_login.clicked.connect(self.check_password)
+        layout.addWidget(button_login, 3, 0, 3, 3)
+        layout.setRowMinimumHeight(2, 75)
+        layout.setContentsMargins(65, 65, 65, 65)
+        self.setLayout(layout)
+
+        self.__try_remember_me_login()
+
+    def check_password(self):
+        msg = QMessageBox()
+        name = self.lineEdit_username.text()
+        password = self.lineEdit_password.text()
+        if name is None or not name:
+            msg.setText('Please enter a username.')
+            msg.exec_()
+            return
+
+        if password is None or not password:
+            msg.setText('Please enter a password.')
+            msg.exec_()
+            return
+
+        conn = create_db_connection(host_config='local', config_path='env')
+        df = conn.select(f"select * from Uzers where Name = '{name}' and Password = '{password}'")
+        conn.close()
+
+        if df.shape[0] == 0:
+            msg.setText("Sorry, this user is not registered in teh system.")
+            msg.exec_()
+            return
+
+        if password not in df['Password'].to_numpy():
+            msg.setText('Incorrect Password.')
+            msg.exec_()
+            return
+
+        user = db_models.User(
+            company_id=df['companyId'].iloc[0],
+            status=df['status'].iloc[0],
+            password=df['Password'].iloc[0],
+            user_id=df['UserID'].iloc[0],
+            logout=df['Logout'].iloc[0],
+            syncid=df['SYNCID'].iloc[0],
+            token=df['token'].iloc[0],
+            email_address=df['emailAddress'].iloc[0],
+            access_level=df['accessLevel'].iloc[0],
+            name=df['Name'].iloc[0],
+            start_work_at=pd.to_datetime(df['Start_work']).iloc[0],
+        )
+        print(user)
+
+        if self.remember_me.isChecked():
+            self.__rememberMe(user)
+
+        self.next_screen(user)
+
+    def forget_password(self, event):
+        if self.forget_password_form is None:
+            self.forget_password_form = ForgetPasswordForm(self)
+            self.forget_password_form.show()
+            self.hide()
+        else:
+            self.forget_password_form.close()  # Close window.
+            self.forget_password_form = None
+            self.show()
+
+        pass
+
+    def __try_remember_me_login(self, ):
+        if os.path.exists(REMEMBER_ME_FILE_PATH):
+            user = self.__getMe()
+            if user is None or not user.email_address:
+                return None
+            else:
+                self.next_screen(user)
+                return True
+        else:
+            return None
+        pass
+
+    def __rememberMe(self, user):
+        with open(REMEMBER_ME_FILE_PATH, 'bw') as file:
+            pickle.dump(user, file)
+
+    def __getMe(self):
+        with open(REMEMBER_ME_FILE_PATH, 'rb') as file:
+            user = pickle.load(file)
+        return user
+
+    def next_screen(self, user):
+
+        if self.main_screen is None:
+            self.main_screen = MainApp(
+                title='FigurozTimeTracker',
+                left=100,
+                top=100,
+                height=500,
+                parent=self,
+                user=user,
+            )
+            self.main_screen.show()
+            self.hide()
+        else:
+            self.main_screen.close()  # Close window.
+            self.main_screen = None
+            self.show()
+        pass
+
 
 class MainApp(QMainWindow):
-    def __init__(self, title, left, top, height, parent=None):
-        super(QMainWindow, self).__init__(parent)
+    def __init__(self, title, left, top, height, parent=None, user=None):
+        super().__init__()
+        self.user = user
+        self.parent = parent
         self.__init_ui(title, left, top, height)
         self.__createMenuBar()
         self.__init_layouts()
@@ -81,23 +297,14 @@ class MainApp(QMainWindow):
         fileMenu.addAction(self.open_action)
         fileMenu.addSeparator()
 
-        self.start_action = QAction("&Start", self)
-        self.start_action.triggered.connect(self.start_timer)
-        fileMenu.addAction(self.start_action)
-
-        self.pause_action = QAction("&Pause", self)
-        self.pause_action.triggered.connect(self.pause_timer)
-        fileMenu.addAction(self.pause_action)
-
-        self.reset_action = QAction("&Reset...", self)
-        self.reset_action.triggered.connect(self.reset_timer)
-        fileMenu.addAction(self.reset_action)
-        fileMenu.addSeparator()
-
         self.screenshot_action = QAction("&Screenshot...", self)
         self.screenshot_action.triggered.connect(self.take_screenshot)
         fileMenu.addAction(self.screenshot_action)
         fileMenu.addSeparator()
+
+        self.logout_action = QAction("&Logout", self)
+        self.logout_action.triggered.connect(self.logout)
+        fileMenu.addAction(self.logout_action)
 
         self.exit_action = QAction("&Exit", self)
         self.exit_action.triggered.connect(self.close)
@@ -108,14 +315,14 @@ class MainApp(QMainWindow):
         snapshot.save(f'./Image_{datetime.now():%Y%m%d_%H%H%S}.png')
         pass
 
-    def start_timer(self):
-        pass
+    def logout(self):
+        if os.path.exists(REMEMBER_ME_FILE_PATH):
+            os.remove(REMEMBER_ME_FILE_PATH)
+        self.hide()
+        self.parent.show()
 
-    def pause_timer(self):
-        pass
-
-    def reset_timer(self):
-        pass
+        self.destroy()
+        del self
 
     def open_file(self):
         path = QFileDialog.getOpenFileName(self, "Open File", './', 'All Files (*);;JSON Files(*.json)')
@@ -163,29 +370,20 @@ class MainApp(QMainWindow):
         pass
 
 
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
 
+    form = LoginForm()
+    if not os.path.exists(REMEMBER_ME_FILE_PATH):
+        form.show()
 
-# import ctypes
-# user32 = ctypes.windll.User32
-# lst = ['Unlocked']
-# print('Unlocked')
-# while True:
-#     if user32.GetForegroundWindow() == 0: # check if the user changed the window he is working on
-#         if lst[-1] != 'Locked':
-#             lst.append('Locked')
-#             print('Locked')
-#     else:
-#         if lst[-1] != 'Unlocked':
-#             lst.append('Unlocked')
-#             print('Unlocked')
-
-
-# import psutil
-#
-# name = ''
-# while True:
-#     for proc in psutil.process_iter():
-#         if proc.name() == "LogonUI.exe":
-#             print("Locked")
-#             break
-
+    # main_screen = MainApp(
+    #     title='FigurozTimeTracker',
+    #     left=100,
+    #     top=100,
+    #     height=500,
+    #     parent=LoginForm(),
+    #     user=None,
+    # )
+    # main_screen.show()
+    sys.exit(app.exec_())

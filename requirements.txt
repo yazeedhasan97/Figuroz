@@ -1,2 +1,9 @@
-iso8601
+
 PyQt5
+qtwidgets
+
+iso8601
+
+sshtunnel
+sqlalchemy
+pandas
