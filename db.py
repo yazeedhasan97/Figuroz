@@ -171,6 +171,13 @@ def create_db_connection(host_config=None, config_path=None):
     )
 
 
+def load_data(sql: str, path: str = 'env', host: str = 'local', ):
+    conn = create_db_connection(host_config=host, config_path=path)
+    data = conn.select(sql)
+    conn.close()
+    return data
+
+
 if __name__ == "__main__":
     conn = create_db_connection(host_config='local', config_path='env')
     df = conn.select('select * from "Aplications" p')

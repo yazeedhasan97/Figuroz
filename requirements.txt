@@ -1,9 +1,5 @@
 
-PyQt5
-qtwidgets
-
-iso8601
-
+PyQt6
 sshtunnel
 sqlalchemy
 pandas

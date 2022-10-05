@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, date
 
+import models
+
 
 class Model(ABC):
     def __iter__(self):
@@ -23,7 +25,7 @@ class Application(Model):
             self, app_id: str, name: str, file_name: str, version: str, description: str, company: str, sync: int,
             user_id: int, entry_id: str, project_id: str, user: str, win_name: str, ico: str
     ) -> None:
-        super().__init__()
+        super(Application, self).__init__()
         self.__app_id = app_id
         self.__name = name
         self.__file_name = file_name
@@ -195,15 +197,143 @@ class Application(Model):
     )
 
 
+class Task(Model):
+    def __init__(self, project_id: str, sub_id: str, company_id: str, status: str, is_select: str, entry_id: str,
+                 m_user: str, description: str) -> None:
+        super(Task, self).__init__()
+        self.__project_id = project_id
+        self.__sub_id = sub_id
+        self.__status = status
+        self.__is_select = is_select
+        self.__entry_id = entry_id
+        self.__m_user = m_user
+        self.__company_id = company_id
+        self.__description = description
+        self.__timer = None
+
+    def __get_timer(self):
+        return self.__timer
+
+    def __set_timer(self, parent):
+        self.__timer = models.CustomTimer(parent=parent)
+
+    timer = property(
+        fget=__get_timer,
+        fset=__set_timer,
+        doc='None.',
+    )
+
+    def __get_is_select(self):
+        return self.__is_select
+
+    def __set_is_select(self, is_select):
+        self.__is_select = is_select
+
+    is_select = property(
+        fget=__get_is_select,
+        fset=__set_is_select,
+        doc='None.',
+    )
+
+    def __get_project_id(self):
+        return self.__project_id
+
+    def __set_project_id(self, project_id):
+        self.__project_id = project_id
+
+    project_id = property(
+        fget=__get_project_id,
+        fset=__set_project_id,
+        doc='None.',
+    )
+
+    def __get_description(self):
+        return self.__description
+
+    def __set_description(self, description):
+        self.__description = description
+
+    description = property(
+        fget=__get_description,
+        fset=__set_description,
+        doc='None.',
+    )
+
+    def __get_sub_id(self):
+        return self.__sub_id
+
+    def __set_sub_id(self, sub_id):
+        self.__sub_id = sub_id
+
+    sub_id = property(
+        fget=__get_sub_id,
+        fset=__set_sub_id,
+        doc='None.',
+    )
+
+    def __get_company_id(self):
+        return self.__company_id
+
+    def __set_company_id(self, company_id):
+        self.__company_id = company_id
+
+    company_id = property(
+        fget=__get_company_id,
+        fset=__set_company_id,
+        doc='None.',
+    )
+
+    def __get_m_user(self):
+        return self.__m_user
+
+    def __set_m_user(self, m_user):
+        self.__m_user = m_user
+
+    m_user = property(
+        fget=__get_m_user,
+        fset=__set_m_user,
+        doc='None.',
+    )
+
+    def __get_status(self):
+        return self.__status
+
+    def __set_status(self, status):
+        self.__status = status
+
+    status = property(
+        fget=__get_status,
+        fset=__set_status,
+        doc='None.',
+    )
+
+    def __get_entry_id(self):
+        return self.__entry_id
+
+    def __set_entry_id(self, entry_id):
+        self.__entry_id = entry_id
+
+    entry_id = property(
+        fget=__get_entry_id,
+        fset=__set_entry_id,
+        doc='None.',
+    )
+
+
 class Project(Model):
-    def __init__(self, project_id: str, name: str, status: str, entry_id: str, m_user: str, company_id: str, ) -> None:
-        super().__init__()
+    def __init__(self, project_id: str, name: str, status: str, entry_id: str, m_user: str, company_id: str,
+                 tasks: list = None) -> None:
+        super(Project, self).__init__()
         self.__project_id = project_id
         self.__name = name
         self.__status = status
         self.__entry_id = entry_id
         self.__m_user = m_user
         self.__company_id = company_id
+        if tasks is not None:
+            self.__tasks = tasks.copy()
+        else:
+            self.__tasks = []
 
     def __get_project_id(self):
         return self.__project_id
@@ -277,11 +407,26 @@ class Project(Model):
         doc='Application name.',
     )
 
+    def __get_tasks(self):
+        return self.__tasks.copy()
+
+    def __set_tasks(self, tasks: list[Task]):
+        self.__tasks = tasks.copy()
+
+    def add_sub_project(self, task: Task):
+        self.tasks += [task]
+
+    tasks = property(
+        fget=__get_tasks,
+        fset=__set_tasks,
+        doc='Application name.',
+    )
+
 
 class ProjectDuration(Model):
     def __init__(self, project_id: str, sub_id: str, entry_id: str, day: date, text: str, duration: str, user_id: str,
                  sync: str, day_format: str, ) -> None:
-        super().__init__()
+        super(ProjectDuration, self).__init__()
         self.__project_id = project_id
         self.__sub_id = sub_id
         self.__entry_id = entry_id
@@ -550,107 +695,10 @@ class ProjectTimeLine(Model):
     )
 
 
-class SubProject(Model):
-    def __init__(self, project_id: str, sub_id: str, company_id: str, status: str, entry_id: str, m_user: str,
-                 description: str) -> None:
-        super().__init__()
-        self.__project_id = project_id
-        self.__sub_id = sub_id
-        self.__status = status
-        self.__entry_id = entry_id
-        self.__m_user = m_user
-        self.__company_id = company_id
-        self.__description = description
-
-    def __get_project_id(self):
-        return self.__project_id
-
-    def __set_project_id(self, project_id):
-        self.__project_id = project_id
-
-    project_id = property(
-        fget=__get_project_id,
-        fset=__set_project_id,
-        doc='None.',
-    )
-
-    def __get_description(self):
-        return self.__description
-
-    def __set_description(self, description):
-        self.__description = description
-
-    description = property(
-        fget=__get_description,
-        fset=__set_description,
-        doc='None.',
-    )
-
-    def __get_sub_id(self):
-        return self.__sub_id
-
-    def __set_sub_id(self, sub_id):
-        self.__sub_id = sub_id
-
-    sub_id = property(
-        fget=__get_sub_id,
-        fset=__set_sub_id,
-        doc='None.',
-    )
-
-    def __get_company_id(self):
-        return self.__company_id
-
-    def __set_company_id(self, company_id):
-        self.__company_id = company_id
-
-    company_id = property(
-        fget=__get_company_id,
-        fset=__set_company_id,
-        doc='None.',
-    )
-
-    def __get_m_user(self):
-        return self.__m_user
-
-    def __set_m_user(self, m_user):
-        self.__m_user = m_user
-
-    m_user = property(
-        fget=__get_m_user,
-        fset=__set_m_user,
-        doc='None.',
-    )
-
-    def __get_status(self):
-        return self.__status
-
-    def __set_status(self, status):
-        self.__status = status
-
-    status = property(
-        fget=__get_status,
-        fset=__set_status,
-        doc='None.',
-    )
-
-    def __get_entry_id(self):
-        return self.__entry_id
-
-    def __set_entry_id(self, entry_id):
-        self.__entry_id = entry_id
-
-    entry_id = property(
-        fget=__get_entry_id,
-        fset=__set_entry_id,
-        doc='None.',
-    )
-
-
 class User(Model):
     def __init__(self, user_id: str, syncid: str, token: str, company_id: str, email_address: str, password: str,
                  status: str, logout: str, access_level: str, start_work_at: datetime, name: str, ) -> None:
-        super().__init__()
+        super(User, self).__init__()
         self.__user_id = user_id
         self.__syncid = syncid
         self.__token = token
@@ -959,10 +1007,10 @@ class Window(Model):
 
 
 if __name__ == "__main__":
-    p = SubProject(
-        project_id='', sub_id="", entry_id="", company_id="", description="", m_user='', status='',
-    )
-    print(dict(p))
-    print(p)
+    # p = Task(
+    #     project_id='', sub_id="", entry_id="", company_id="", description="", m_user='', status='',
+    # )
+    # print(dict(p))
+    # print(p)
 
     pass

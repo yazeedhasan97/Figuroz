@@ -1,133 +1,161 @@
-import json
 import logging
 import numbers
-import typing
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Union, Optional
+import os
+import sys
 
-import iso8601
+from datetime import timedelta, datetime
+from typing import Union
+
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtWidgets import QLabel, QWidget, QHBoxLayout, QStyledItemDelegate, QStyleOptionViewItem, QApplication
+
+import consts
+import utils
 
 logger = logging.getLogger(__name__)
 
 Number = Union[int, float]
-Id = Optional[Union[int, str]]
-ConvertibleTimestamp = Union[datetime, str]
 Duration = Union[timedelta, Number]
-Data = Dict[str, Any]
 
 
-def _timestamp_parse(ts_in: ConvertibleTimestamp) -> datetime:
-    """
-    Takes something representing a timestamp and
-    returns a timestamp in the representation we want.
-    """
-    ts = iso8601.parse_date(ts_in) if isinstance(ts_in, str) else ts_in
-    # Set resolution to milliseconds instead of microseconds
-    # (Fixes incompability with software based on unix time, for example mongodb)
-    ts = ts.replace(microsecond=int(ts.microsecond / 1000) * 1000)
-    # Add timezone if not set
-    if not ts.tzinfo:
-        # Needed? All timestamps should be iso8601 so ought to always contain timezone.
-        # Yes, because it is optional in iso8601
-        logger.warning(f"timestamp without timezone found, using UTC: {ts}")
-        ts = ts.replace(tzinfo=timezone.utc)
-    return ts
+class QClickableLabel(QLabel):
+    def __init__(self, msg, when_clicked, parent=None):
+        QLabel.__init__(
+            self,
+            msg,
+            parent=parent
+        )
+        self._when_clicked = when_clicked
+
+    def mouseReleaseEvent(self, event):
+        self._when_clicked(event)
 
 
-class Event(dict):
-    """
-    Used to represents an event.
-    """
+class ItemDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        option.decorationPosition = QStyleOptionViewItem.ViewItemPosition.Right
+        super(ItemDelegate, self).paint(painter, option, index)
 
-    def __init__(self, id: Id = None, timestamp: ConvertibleTimestamp = None, duration: Duration = 0,
-                 data: Data = dict()) -> None:
-        self.id = id
-        if timestamp is None:
-            logger.warning(
-                "Event initializer did not receive a timestamp argument, using now as timestamp"
-            )
-            # FIXME: The typing.cast here was required for mypy to shut up, weird...
-            self.timestamp = datetime.now(typing.cast(timezone, timezone.utc))
+
+class CustomTimer(QWidget, ):
+    def __init__(self, parent=None, count: Duration = timedelta(seconds=0), flag: bool = False, timer: QTimer = None,
+                 label: QLabel = None, icon: QLabel = None):
+        super(CustomTimer, self).__init__(parent)
+        self.__count = count
+        self.__flag = flag
+        self.__today = datetime.today()
+
+        if timer is None:
+            self.__timer = QTimer(self)
         else:
-            # The conversion needs to be explicit here for mypy to pick it up (lacks support for properties)
-            self.timestamp = _timestamp_parse(timestamp)
-        self.duration = duration  # type: ignore
-        self.data = data
+            self.__timer = timer
+        # update the timer every single second
 
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, Event):
-            return (
-                    self.timestamp == other.timestamp
-                    and self.duration == other.duration
-                    and self.data == other.data
-            )
+        if label is None:
+            self.__label = QLabel()
         else:
-            raise TypeError(
-                "operator not supported between instances of '{}' and '{}'".format(
-                    type(self), type(other)
-                )
-            )
+            self.__label = label
 
-    def __lt__(self, other: object) -> bool:
-        if isinstance(other, Event):
-            return self.timestamp < other.timestamp
+        self.__label.setText(str(self.count))
+        self.__label.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        if icon is None:
+            self.__icon = QLabel()
         else:
-            raise TypeError(
-                "operator not supported between instances of '{}' and '{}'".format(
-                    type(self), type(other)
-                )
-            )
+            self.__icon = icon
+        # TODO: the size problem is in here for the icons
+        self.__icon.setPixmap(QPixmap(consts.START_ICON_PATH))
 
-    def to_json_dict(self) -> dict:
-        """Useful when sending data over the wire.
-        Any mongodb interop should not use do this as it accepts datetimes."""
-        json_data = self.copy()
-        json_data["timestamp"] = self.timestamp.astimezone(timezone.utc).isoformat()
-        json_data["duration"] = self.duration.total_seconds()
-        return json_data
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addStretch()
+        layout.addWidget(self.__label)
+        layout.addSpacing(2)
+        layout.addWidget(self.__icon)
 
-    def to_json_str(self) -> str:
-        data = self.to_json_dict()
-        return json.dumps(data)
+        self.__timer.start(1000)
+        self.__timer.timeout.connect(self.show_time)
 
-    def _hasprop(self, propname: str) -> bool:
-        """Badly named, but basically checks if the underlying
-        dict has a prop, and if it is a non-empty list"""
-        return propname in self and self[propname] is not None
+    def __get_count(self):
+        # return self.__count
+        return self.__count
 
-    @property
-    def id(self) -> Id:
-        return self["id"] if self._hasprop("id") else None
-
-    @id.setter
-    def id(self, id: Id) -> None:
-        self["id"] = id
-
-    @property
-    def data(self) -> dict:
-        return self["data"] if self._hasprop("data") else {}
-
-    @data.setter
-    def data(self, data: dict) -> None:
-        self["data"] = data
-
-    @property
-    def timestamp(self) -> datetime:
-        return self["timestamp"]
-
-    @timestamp.setter
-    def timestamp(self, timestamp: ConvertibleTimestamp) -> None:
-        self["timestamp"] = _timestamp_parse(timestamp).astimezone(timezone.utc)
-
-    @property
-    def duration(self) -> timedelta:
-        return self["duration"] if self._hasprop("duration") else timedelta(0)
-
-    @duration.setter
-    def duration(self, duration: Duration) -> None:
-        if isinstance(duration, timedelta):
-            self["duration"] = duration
-        elif isinstance(duration, numbers.Real):
-            self["duration"] = timedelta(seconds=duration)  # type: ignore
+    def __set_count(self, count: Duration, reset: bool = False):
+        if isinstance(count, timedelta):
+            if reset:
+                self.__count = count
+            else:
+                self.__count += count
+        elif isinstance(count, numbers.Real):
+            if reset:
+                self.__count = timedelta(seconds=count)
+            else:
+                self.__count += timedelta(seconds=count)
         else:
-            raise TypeError(f"Couldn't parse duration of invalid type {type(duration)}")
+            raise TypeError(f"Couldn't parse duration of invalid type {type(count)}")
+
+    count = property(
+        fget=__get_count,
+        fset=__set_count,
+        doc='None.',
+    )
+
+    def __get_flag(self):
+        return self.__flag
+
+    def __set_flag(self, flag):
+        self.__flag = flag
+
+    flag = property(
+        fget=__get_flag,
+        fset=__set_flag,
+        doc='None.',
+    )
+
+    # method called by timer
+    def show_time(self, mode=None):
+        # checking if flag is true
+        if not mode:
+            if self.flag:
+                # incrementing the counter
+                self.count = timedelta(seconds=1)
+
+            if utils.check_if_midnight() or self.__today.date() > datetime.today().date():
+                self.__reset()
+        # showing text
+        self.__label.setText(str(self.count))
+
+
+    def change(self):
+        # making flag to true
+        if not self.flag:
+            return self.start()
+        else:
+            return self.pause()
+
+    def start(self):
+        # making flag to true
+        self.__icon.setPixmap(QPixmap(consts.PAUSE_ICON_PATH))
+        self.flag = True
+
+        return self
+
+    def pause(self):
+        # making flag to False
+        self.__icon.setPixmap(QPixmap(consts.START_ICON_PATH))
+        self.flag = False
+        return self
+
+    def __reset(self):
+        self.flag = False
+        self.__set_count(timedelta(seconds=0), reset=True)
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    form = CustomTimer()
+    form.show()
+
+    sys.exit(app.exec())
+    pass

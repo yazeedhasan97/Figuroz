@@ -1,53 +1,24 @@
-import re
-import sys, json, glob, os
-from datetime import datetime
-from PIL import ImageGrab
+import os
 
-from PyQt5.QtWidgets import QApplication, QWidget, QListWidget, QVBoxLayout, QHBoxLayout, QPushButton, QGridLayout, \
-    QLabel, QStackedLayout, QMenu, QMainWindow, QAction, QFileDialog, QLayout
-from PyQt5.QtGui import QIcon
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QWidget, QListWidget, QHBoxLayout, QPushButton, QGridLayout, \
+    QLabel, QMenu, QMainWindow, QLayout, QListWidgetItem, \
+    QAbstractItemView, QLineEdit, QMessageBox, QCheckBox
+from PyQt6.QtGui import QIcon, QAction
 
-import main
-
-# from PySide2.QtCore import *
-# from PySide2.QtWidgets import *
-
-
-TASKS = 'tasks'
-SUBS = 'tasks'
-STATE = 'state'
-TOTAL_TIME = 'total_time'
-TIME = 'time'
-DESCRIPTION = 'description'
-WORK_TODAY = 'work_today'
-ACTIVE_TASK = 'active_task'
-NAME = 'name'
+import db
+import models
 
 import os.path
 import pickle
 import sys
 
 import pandas as pd
-from PyQt5.QtWidgets import (QApplication, QWidget, QPushButton, QLabel, QLineEdit, QGridLayout, QMessageBox, QCheckBox)
-from qtwidgets import PasswordEdit
 
 import db_models
+import utils
 from db import create_db_connection
-
-REMEMBER_ME_FILE_PATH = './env/user.pkl'
-
-
-class QClickableLabel(QLabel):
-    def __init__(self, msg, whenClicked, parent=None):
-        QLabel.__init__(
-            self,
-            msg,
-            parent=parent
-        )
-        self._whenClicked = whenClicked
-
-    def mouseReleaseEvent(self, event):
-        self._whenClicked(event)
+import consts
 
 
 class ForgetPasswordForm(QWidget):
@@ -57,11 +28,10 @@ class ForgetPasswordForm(QWidget):
     """
 
     def __init__(self, parent=None):
-        super().__init__()
+        super(ForgetPasswordForm, self).__init__()
         self.login_form = None
         self.parent = parent
-        self.setWindowTitle('Forget Password Form')
-        self.resize(500, 300)
+        self.__init_ui()
 
         layout = QGridLayout()
 
@@ -84,6 +54,19 @@ class ForgetPasswordForm(QWidget):
         layout.setContentsMargins(65, 65, 65, 65)
         self.setLayout(layout)
 
+    def __init_ui(self):
+        self.setWindowTitle('Forget Password Form')
+        height = 300
+        width = 500
+        self.resize(width, height)
+        self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
+
+        self.setMinimumWidth(width)
+        self.setMaximumWidth(width)
+
+        pass
+
     def check_password(self):
         print('Do something')
         pass
@@ -99,11 +82,11 @@ class ForgetPasswordForm(QWidget):
 
 class LoginForm(QWidget):
     def __init__(self, ):
-        super().__init__()
+        super(LoginForm, self).__init__()
+        self.__init_ui()
+
         self.forget_password_form = None
         self.main_screen = None
-        self.setWindowTitle('Login Form')
-        self.resize(500, 300)
 
         layout = QGridLayout()
 
@@ -114,16 +97,23 @@ class LoginForm(QWidget):
         layout.addWidget(self.lineEdit_username, 0, 2, )
 
         label_password = QLabel('<font size="4"> Password </font>')
-        self.lineEdit_password = PasswordEdit()
-        self.lineEdit_password.setEchoMode(QLineEdit.Password)
+        self.lineEdit_password = QLineEdit()
+        self.lineEdit_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.lineEdit_password.setPlaceholderText('Please enter your password')
+
+        self.__show_pass_action = QAction(QIcon(consts.UNHIDDEN_EYE_ICON_PATH), 'Show password', self)
+        self.__show_pass_action.setCheckable(True)
+        self.__show_pass_action.toggled.connect(self.show_password)
+        self.lineEdit_password.addAction(self.__show_pass_action, QLineEdit.ActionPosition.TrailingPosition)
+
         layout.addWidget(label_password, 1, 0)
         layout.addWidget(self.lineEdit_password, 1, 2, )
 
         self.remember_me = QCheckBox('Remember me')
         layout.addWidget(self.remember_me, 2, 0)
 
-        label_forget_password = QClickableLabel('<font size="3"> Forget Password? </font>', self.forget_password, )
+        label_forget_password = models.QClickableLabel('<font size="3"> Forget Password? </font>',
+                                                       self.forget_password, )
         layout.addWidget(label_forget_password, 2, 2)
 
         button_login = QPushButton('Login')
@@ -135,18 +125,39 @@ class LoginForm(QWidget):
 
         self.__try_remember_me_login()
 
+    def show_password(self, ):
+        if self.lineEdit_password.echoMode() == QLineEdit.EchoMode.Normal:
+            self.lineEdit_password.setEchoMode(QLineEdit.EchoMode.Password)
+            self.__show_pass_action.setIcon(QIcon(consts.UNHIDDEN_EYE_ICON_PATH))
+        else:
+            self.lineEdit_password.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.__show_pass_action.setIcon(QIcon(consts.HIDDEN_EYE_ICON_PATH))
+
+    def __init_ui(self):
+        self.setWindowTitle('Login Form')
+        height = 300
+        width = 500
+        self.resize(width, height)
+        self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
+
+        self.setMinimumWidth(width)
+        self.setMaximumWidth(width)
+
+        pass
+
     def check_password(self):
         msg = QMessageBox()
         name = self.lineEdit_username.text()
         password = self.lineEdit_password.text()
         if name is None or not name:
             msg.setText('Please enter a username.')
-            msg.exec_()
+            msg.exec()
             return
 
         if password is None or not password:
             msg.setText('Please enter a password.')
-            msg.exec_()
+            msg.exec()
             return
 
         conn = create_db_connection(host_config='local', config_path='env')
@@ -155,12 +166,12 @@ class LoginForm(QWidget):
 
         if df.shape[0] == 0:
             msg.setText("Sorry, this user is not registered in teh system.")
-            msg.exec_()
+            msg.exec()
             return
 
         if password not in df['Password'].to_numpy():
             msg.setText('Incorrect Password.')
-            msg.exec_()
+            msg.exec()
             return
 
         user = db_models.User(
@@ -196,7 +207,7 @@ class LoginForm(QWidget):
         pass
 
     def __try_remember_me_login(self, ):
-        if os.path.exists(REMEMBER_ME_FILE_PATH):
+        if os.path.exists(consts.REMEMBER_ME_FILE_PATH):
             user = self.__getMe()
             if user is None or not user.email_address:
                 return None
@@ -208,11 +219,11 @@ class LoginForm(QWidget):
         pass
 
     def __rememberMe(self, user):
-        with open(REMEMBER_ME_FILE_PATH, 'bw') as file:
+        with open(consts.REMEMBER_ME_FILE_PATH, 'bw') as file:
             pickle.dump(user, file)
 
     def __getMe(self):
-        with open(REMEMBER_ME_FILE_PATH, 'rb') as file:
+        with open(consts.REMEMBER_ME_FILE_PATH, 'rb') as file:
             user = pickle.load(file)
         return user
 
@@ -223,150 +234,247 @@ class LoginForm(QWidget):
                 title='FigurozTimeTracker',
                 left=100,
                 top=100,
-                height=500,
+                height=400,
                 parent=self,
                 user=user,
             )
             self.main_screen.show()
-            self.hide()
         else:
-            self.main_screen.close()  # Close window.
+            self.main_screen.show()  # Close window.
             self.main_screen = None
-            self.show()
+
+        self.hide()
+        self.close()
+        self.destroy()
+
         pass
 
 
 class MainApp(QMainWindow):
+
     def __init__(self, title, left, top, height, parent=None, user=None):
-        super().__init__()
+        super(MainApp, self).__init__(parent)
+        self.__init_ui(title, left, top, height)
+
         self.user = user
         self.parent = parent
-        self.__init_ui(title, left, top, height)
-        self.__createMenuBar()
+
+        self._ = None  # dummy var for internal use
+        self.tasks_qlist_dict = {}  # dummy var for internal use
+        # self.active_projects = {}
+        # self.active_sub_projects = {}
+        self.projects = []
+        # self.tasks = []
+
+        self.__init_data()
+
+        self.__create_menu_bar()
+
         self.__init_layouts()
+
+        self.__fill_projects_qlist()
+        self.__fill_tasks_qlist_dict()
+
+    def __create_menu_bar(self):
+        menu_bar = self.menuBar()
+        # Creating menus using a QMenu object
+        file_menu = QMenu("&File", self)
+        menu_bar.addMenu(file_menu)
+
+        self.screenshot_action = QAction("&Screenshot...", self)
+        self.screenshot_action.triggered.connect(utils.take_screenshot)
+        file_menu.addAction(self.screenshot_action)
+        file_menu.addSeparator()
+
+        self.logout_action = QAction("&Logout", self)
+        self.logout_action.triggered.connect(self.__logout)
+        file_menu.addAction(self.logout_action)
+
+        self.exit_action = QAction("&Exit", self)
+        self.exit_action.triggered.connect(self.close)
+        file_menu.addAction(self.exit_action)
+
+    def __logout(self):
+        if os.path.exists(consts.REMEMBER_ME_FILE_PATH):
+            os.remove(consts.REMEMBER_ME_FILE_PATH)
+
+        self.parent.show()
+        self.hide()
+        self.destroy()
 
     def __init_ui(self, title, left, top, height):
         self.setWindowTitle(title)
         self.setGeometry(left, top, int(height * 1.4), height)
 
+        self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
+
+        self.setMinimumWidth(int(height * 1.4))
+        self.setMaximumWidth(int(height * 1.4))
+        # self.setWindowIcon(QIcon('logo.png'))
+
     def __init_layouts(self):
+        layout = QGridLayout()
+        layout.sizeConstraint = QLayout.SizeConstraint.SetDefaultConstraint
+
+        main_widget = QWidget()
+        main_widget.setLayout(layout)
+        self.setCentralWidget(main_widget)
+
         # Define The Project Description Layout
-        self.title_layout = QGridLayout()
+        title_layout = QGridLayout()
         self.lbl_pr_name = QLabel('Project: ')
-        self.title_layout.addWidget(self.lbl_pr_name, 0, 0)
+        title_layout.addWidget(self.lbl_pr_name, 0, 0)
 
         self.lbl_pr_state = QLabel('State: ')
-        self.title_layout.addWidget(self.lbl_pr_state, 1, 0)
+        title_layout.addWidget(self.lbl_pr_state, 1, 0)
 
         self.lbl_pr_total_time = QLabel('Total Time: ', )
-        self.title_layout.addWidget(self.lbl_pr_total_time, 0, 1)
+        title_layout.addWidget(self.lbl_pr_total_time, 0, 1)
 
         self.lbl_pr_active_task = QLabel('Current Active Task: ')
-        self.title_layout.addWidget(self.lbl_pr_active_task, 1, 1)
+        title_layout.addWidget(self.lbl_pr_active_task, 1, 1)
 
-        # Define The Project TASKS and SUB-TASKS Layout
+        layout.addLayout(title_layout, 0, 1)
 
-        self.tasks_layout = QVBoxLayout()
-        self.sub_tasks_layout = QVBoxLayout()
-        self.sub_tasks_lst = QListWidget()
-        self.sub_tasks_layout.addWidget(self.sub_tasks_lst)
+        # Define The Project Layout
+        self.projects_layout = QHBoxLayout()
+        layout.addLayout(self.projects_layout, 2, 0, )
 
-        self.lower_layout = QHBoxLayout()
-        self.lower_layout.addLayout(self.tasks_layout)
-        self.lower_layout.addLayout(self.sub_tasks_layout)
+        # Define The SubProjects Layout
+        self.sub_projects_layout = QHBoxLayout()
+        layout.addLayout(self.sub_projects_layout, 2, 1, )
 
-        # self.main_layout = QVBoxLayout()
-        self.main_widget = QWidget()
-        self.layout = QVBoxLayout()
-        self.layout.sizeConstraint = QLayout.SetDefaultConstraint
+    def __init_data(self):
+        msg = QMessageBox()
+        projects_df = db.load_data(
+            f"select * from Project "
+            f"where m_user = '{self.user.syncid}' and CompanyID = '{self.user.company_id}' "
+            f"and Status = '1' "
+        )
 
-        self.layout.addLayout(self.title_layout)
-        self.layout.addLayout(self.lower_layout)
+        if projects_df.shape[0] == 0:
+            msg.setText('This user has no active projects to show.')
+            msg.exec()
+            return
 
-        self.main_widget.setLayout(self.layout)
-        self.setCentralWidget(self.main_widget)
+        subs_df = db.load_data(
+            f"select * from subproject "
+            f"where ProjectID in {tuple(projects_df['ProjectID'].values)} and m_user = '{self.user.syncid}' "
+            f"and Status = '1' "
+        )
 
-    def __createMenuBar(self):
-        menuBar = self.menuBar()
-        # Creating menus using a QMenu object
-        fileMenu = QMenu("&File", self)
-        menuBar.addMenu(fileMenu)
+        if subs_df.shape[0] == 0:
+            msg.setText('This user has no active sub-projects to show.')
+            msg.exec()
+            return
 
-        self.open_action = QAction("&Open...", self)
-        self.open_action.triggered.connect(self.open_file)
-        fileMenu.addAction(self.open_action)
-        fileMenu.addSeparator()
+        self.projects = [db_models.Project(
+            project_id=a.ProjectID,
+            name=a.Name.title(),
+            status=a.Status,
+            entry_id=a.EntryID,
+            m_user=a.m_user,
+            company_id=a.CompanyID,
 
-        self.screenshot_action = QAction("&Screenshot...", self)
-        self.screenshot_action.triggered.connect(self.take_screenshot)
-        fileMenu.addAction(self.screenshot_action)
-        fileMenu.addSeparator()
+        ) for a in projects_df.itertuples()]
 
-        self.logout_action = QAction("&Logout", self)
-        self.logout_action.triggered.connect(self.logout)
-        fileMenu.addAction(self.logout_action)
+        tasks = [db_models.Task(
+            project_id=a.ProjectID,
+            sub_id=a.subID,
+            status=a.Status,
+            entry_id=a.EntryID,
+            m_user=a.m_user,
+            company_id=a.CompanyID,
+            description=a.description.title(),
+            is_select=a.isselect,
+        ) for a in subs_df.itertuples()]
 
-        self.exit_action = QAction("&Exit", self)
-        self.exit_action.triggered.connect(self.close)
-        fileMenu.addAction(self.exit_action)
+        del projects_df, subs_df
 
-    def take_screenshot(self):
-        snapshot = ImageGrab.grab()
-        snapshot.save(f'./Image_{datetime.now():%Y%m%d_%H%H%S}.png')
+        for i in range(len(self.projects)):
+            self.projects[i].tasks = utils.pid_filter(
+                pid=self.projects[i].project_id,
+                lst=tasks,
+            )
+
+    def __fill_tasks_qlist_dict(self):
+        for project in self.projects:
+            sub_qlist = QListWidget()
+            sub_qlist.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            sub_qlist.setSpacing(1)
+
+            for i, sub in enumerate(project.tasks):
+                # TODO: try the inverse method, where the timers are in a dict here {sub_id -> timer}
+                #  and
+                sub.timer = sub_qlist
+                item = QListWidgetItem(sub_qlist)
+                item.setData(Qt.ItemDataRole.UserRole, tuple([project, i]))
+                item.setText(sub.description)
+                sub_qlist.addItem(item)
+                sub_qlist.setItemWidget(item, sub.timer)
+
+            self.tasks_qlist_dict[project.project_id] = sub_qlist
         pass
 
-    def logout(self):
-        if os.path.exists(REMEMBER_ME_FILE_PATH):
-            os.remove(REMEMBER_ME_FILE_PATH)
-        self.hide()
-        self.parent.show()
+    def __fill_projects_qlist(self):
+        self.projects_list_widget = QListWidget()
+        self.projects_list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.projects_list_widget.setSpacing(10)
+        self.projects_list_widget.setStyleSheet(consts.PROJECTS_LISTWIDGET_STYLESHEET)
 
-        self.destroy()
-        del self
+        self.projects_layout.addWidget(
+            self.projects_list_widget
+        )
 
-    def open_file(self):
-        path = QFileDialog.getOpenFileName(self, "Open File", './', 'All Files (*);;JSON Files(*.json)')
+        for project in self.projects:
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, project)
+            item.setText(project.name)
+            self.projects_list_widget.addItem(item)
 
-        if path and path[0].endswith('.json'):
-            self.project = self.load_project(path[0])
-            self.lbl_pr_name.setText(f'Project: {self.project[NAME]}')
-            self.lbl_pr_state.setText(f'State: {self.project[STATE]}')
-            self.lbl_pr_total_time.setText(f'Total Time: {self.project[TOTAL_TIME]}')
-            self.lbl_pr_active_task.setText(f'Current Active Task: {self.project[ACTIVE_TASK]}')
-            self.load_tasks()
-        else:
-            raise FileNotFoundError('The selected JSON file is unable to load.')
+        self.projects_list_widget.itemClicked.connect(self.__show_project_ui)
 
-    def load_project(self, path):
-        with open(path) as file:
-            project = json.load(file)
-        return project
+    def __show_project_ui(self, item, ):
+        project = item.data(Qt.ItemDataRole.UserRole)
 
-    def load_tasks(self):
-        for i in reversed(range(self.tasks_layout.count() - 1)):
-            self.tasks_layout.takeAt(i).widget().deleteLater()
+        self.lbl_pr_name.setText(utils.extract_before_from(self.lbl_pr_name.text(), ': ') + project.name)
 
-        self.available_tasks = {}
-        for task in self.project[TASKS].keys():
-            self.available_tasks[task] = QPushButton(task)
-            self.tasks_layout.addWidget(self.available_tasks[task])
+        self.lbl_pr_state.setText(utils.extract_before_from(self.lbl_pr_state.text(), ': ') + project.status)
 
-        self.connect_tasks_to_actions()
+        for key in self.tasks_qlist_dict.keys():
+            self.tasks_qlist_dict[key].hide()
+
+        self.sub_projects_layout.addWidget(self.tasks_qlist_dict[project.project_id])
+        self.tasks_qlist_dict[project.project_id].show()
+
+        # self.tasks_qlist_dict[project.project_id].itemClicked.connect(self.__start_timer)
+        self.tasks_qlist_dict[project.project_id].itemClicked.connect(self.__start_timer)
+        self.tasks_qlist_dict[project.project_id].itemChanged.connect(self.__pause_timer)
+        self.tasks_qlist_dict[project.project_id].itemDoubleClicked.connect(self.__pause_timer)
+
+    def __start_timer(self, item):
+        project, task_idx = item.data(Qt.ItemDataRole.UserRole)
+        self.lbl_pr_active_task.setText(
+            utils.extract_before_from(self.lbl_pr_active_task.text(), ': ') + project.tasks[task_idx].description
+        )
+        # TODO: activate this lbl
+        # title_total_time_pr = self.lbl_pr_total_time.text()[:self.lbl_pr_total_time.text().find(': ') + 2]
+        # self.lbl_pr_total_time.setText(self.active_sub_projects[temp.sub_id].timer.label)
+
+        for pro in self.projects:
+            for tsk in pro.tasks:
+                if tsk.timer.flag:
+                    tsk.timer.pause()
+
+        project.tasks[task_idx].timer.start()
+        project.tasks[task_idx].timer.show_time(mode='display')
         pass
 
-    def connect_tasks_to_actions(self):
-        for task in self.available_tasks.keys():
-            sub_tasks = self.project[TASKS][task][SUBS]
-            self.available_tasks[task].clicked.connect(lambda x: self.load_sub_tasks(sub_tasks))
-        pass
-
-    def load_sub_tasks(self, sub_tasks_dct):
-        self.sub_tasks_lst.clear()
-        print(sub_tasks_dct)
-        for sub in sub_tasks_dct.keys():
-            print(sub)
-            passed_time = sub_tasks_dct[sub][TIME]
-            self.sub_tasks_lst.addItems([sub, passed_time])
+    def __pause_timer(self, item):
+        project, task_idx = item.data(Qt.ItemDataRole.UserRole)
+        project.tasks[task_idx].timer.pause()
+        project.tasks[task_idx].timer.show_time(mode='display')
         pass
 
 
@@ -374,16 +482,8 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
 
     form = LoginForm()
-    if not os.path.exists(REMEMBER_ME_FILE_PATH):
+    if not os.path.exists(consts.REMEMBER_ME_FILE_PATH):
         form.show()
 
-    # main_screen = MainApp(
-    #     title='FigurozTimeTracker',
-    #     left=100,
-    #     top=100,
-    #     height=500,
-    #     parent=LoginForm(),
-    #     user=None,
-    # )
-    # main_screen.show()
-    sys.exit(app.exec_())
+    # sys.exit(app.exec())
+    sys.exit(app.exec())

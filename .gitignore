@@ -1,6 +1,9 @@
 venv/
-*.json
-*.sdf
 .idea/
 __pycache__/
-test.py
+*.json
+*.sdf
+test*.py
+*.pdf
+*.docx
+*.pkl
