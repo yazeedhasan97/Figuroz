@@ -7,3 +7,6 @@ test*.py
 *.pdf
 *.docx
 *.pkl
+tests/
+*test*
+*test.ini

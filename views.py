@@ -1,24 +1,22 @@
 import os
+import pickle
+import sys
+from datetime import timedelta, datetime
 
+import pandas as pd
+from PyQt6 import QtGui
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QWidget, QListWidget, QHBoxLayout, QPushButton, QGridLayout, \
+from PyQt6.QtWidgets import QApplication, QWidget, QListWidget, QHBoxLayout, QGridLayout, \
     QLabel, QMenu, QMainWindow, QLayout, QListWidgetItem, \
-    QAbstractItemView, QLineEdit, QMessageBox, QCheckBox
+    QAbstractItemView, QMessageBox, QLineEdit, QPushButton, QCheckBox
 from PyQt6.QtGui import QIcon, QAction
 
 import db
-import models
-
-import os.path
-import pickle
-import sys
-
-import pandas as pd
-
-import db_models
 import utils
-from db import create_db_connection
-import consts
+import db_models
+
+import models, consts
+from tests import SQLs
 
 
 class ForgetPasswordForm(QWidget):
@@ -160,34 +158,34 @@ class LoginForm(QWidget):
             msg.exec()
             return
 
-        conn = create_db_connection(host_config='local', config_path='env')
-        df = conn.select(f"select * from Uzers where Name = '{name}' and Password = '{password}'")
-        conn.close()
+        df = db.execute(SQLs.SELECT_ALL_USERS_WHERE_NAME_AND_PASSWORD.format(
+            name=name,
+            password=password
+        ), conn_s=db.CONN)
 
         if df.shape[0] == 0:
             msg.setText("Sorry, this user is not registered in teh system.")
             msg.exec()
             return
 
-        if password not in df['Password'].to_numpy():
+        if password not in df['password'].to_numpy():
             msg.setText('Incorrect Password.')
             msg.exec()
             return
 
         user = db_models.User(
-            company_id=df['companyId'].iloc[0],
+            company_id=df['company_id'].iloc[0],
             status=df['status'].iloc[0],
-            password=df['Password'].iloc[0],
-            user_id=df['UserID'].iloc[0],
-            logout=df['Logout'].iloc[0],
-            syncid=df['SYNCID'].iloc[0],
+            password=df['password'].iloc[0],
+            user_id=df['user_id'].iloc[0],
+            logout=df['logout'].iloc[0],
+            sync_id=df['sync_id'].iloc[0],
             token=df['token'].iloc[0],
-            email_address=df['emailAddress'].iloc[0],
-            access_level=df['accessLevel'].iloc[0],
-            name=df['Name'].iloc[0],
-            start_work_at=pd.to_datetime(df['Start_work']).iloc[0],
+            email_address=df['email_address'].iloc[0],
+            access_level=df['access_level'].iloc[0],
+            name=df['name'].iloc[0],
+            start_work_at=pd.to_datetime(df['start_work_at']).iloc[0],
         )
-        print(user)
 
         if self.remember_me.isChecked():
             self.__rememberMe(user)
@@ -230,7 +228,7 @@ class LoginForm(QWidget):
     def next_screen(self, user):
 
         if self.main_screen is None:
-            self.main_screen = MainApp(
+            self.main_screen = MainAppA(
                 title='FigurozTimeTracker',
                 left=100,
                 top=100,
@@ -250,21 +248,20 @@ class LoginForm(QWidget):
         pass
 
 
-class MainApp(QMainWindow):
+class MainAppA(QMainWindow):
 
     def __init__(self, title, left, top, height, parent=None, user=None):
-        super(MainApp, self).__init__(parent)
+        super(MainAppA, self).__init__(parent)
         self.__init_ui(title, left, top, height)
 
         self.user = user
         self.parent = parent
 
-        self._ = None  # dummy var for internal use
-        self.tasks_qlist_dict = {}  # dummy var for internal use
-        # self.active_projects = {}
-        # self.active_sub_projects = {}
+        self.active_event = None
+        self.tasks_qlist_dict = {}
+        self.tasks_timers_dict = {}
         self.projects = []
-        # self.tasks = []
+        # self.events = models.Event() # TODO: should this be here?
 
         self.__init_data()
 
@@ -323,17 +320,17 @@ class MainApp(QMainWindow):
 
         # Define The Project Description Layout
         title_layout = QGridLayout()
-        self.lbl_pr_name = QLabel('Project: ')
+        self.lbl_pr_name = QLabel('Active Project: ')
         title_layout.addWidget(self.lbl_pr_name, 0, 0)
 
-        self.lbl_pr_state = QLabel('State: ')
-        title_layout.addWidget(self.lbl_pr_state, 1, 0)
+        self.lbl_pr_active_task = QLabel('Active Task: ')
+        title_layout.addWidget(self.lbl_pr_active_task, 1, 0)
 
-        self.lbl_pr_total_time = QLabel('Total Time: ', )
+        self.lbl_task_timer = QLabel('Task Timer: ')
+        title_layout.addWidget(self.lbl_task_timer, 1, 1)
+
+        self.lbl_pr_total_time = QLabel('Project Timer: ', )
         title_layout.addWidget(self.lbl_pr_total_time, 0, 1)
-
-        self.lbl_pr_active_task = QLabel('Current Active Task: ')
-        title_layout.addWidget(self.lbl_pr_active_task, 1, 1)
 
         layout.addLayout(title_layout, 0, 1)
 
@@ -347,22 +344,19 @@ class MainApp(QMainWindow):
 
     def __init_data(self):
         msg = QMessageBox()
-        projects_df = db.load_data(
-            f"select * from Project "
-            f"where m_user = '{self.user.syncid}' and CompanyID = '{self.user.company_id}' "
-            f"and Status = '1' "
-        )
+        projects_df = db.execute(SQLs.SELECT_ALL_PROJECTS_WHERE_USER_AND_COMPANY.format(
+            user=self.user.sync_id, company_id=self.user.company_id,
+        ), conn_s=db.CONN)
 
         if projects_df.shape[0] == 0:
             msg.setText('This user has no active projects to show.')
             msg.exec()
             return
 
-        subs_df = db.load_data(
-            f"select * from subproject "
-            f"where ProjectID in {tuple(projects_df['ProjectID'].values)} and m_user = '{self.user.syncid}' "
-            f"and Status = '1' "
-        )
+        subs_df = db.execute(SQLs.SELECT_ALL_TASKS_WHERE_PROJECTS_AND_USER.format(
+            user=self.user.sync_id,
+            project_id_tuple=tuple(projects_df['project_id'].values)
+        ), conn_s=db.CONN)
 
         if subs_df.shape[0] == 0:
             msg.setText('This user has no active sub-projects to show.')
@@ -370,52 +364,33 @@ class MainApp(QMainWindow):
             return
 
         self.projects = [db_models.Project(
-            project_id=a.ProjectID,
-            name=a.Name.title(),
-            status=a.Status,
-            entry_id=a.EntryID,
+            project_id=a.project_id,
+            name=a.name.title(),
+            status=a.status,
+            entry_id=a.entry_id,
             m_user=a.m_user,
-            company_id=a.CompanyID,
-
+            company_id=a.company_id,
         ) for a in projects_df.itertuples()]
 
         tasks = [db_models.Task(
-            project_id=a.ProjectID,
-            sub_id=a.subID,
-            status=a.Status,
-            entry_id=a.EntryID,
+            project_id=a.project_id,
+            sub_id=a.sub_id,
+            status=a.status,
+            entry_id=a.entry_id,
             m_user=a.m_user,
-            company_id=a.CompanyID,
+            company_id=a.company_id,
             description=a.description.title(),
-            is_select=a.isselect,
+            is_select=a.is_select,
         ) for a in subs_df.itertuples()]
 
         del projects_df, subs_df
 
+        # assign tasks to projects
         for i in range(len(self.projects)):
             self.projects[i].tasks = utils.pid_filter(
                 pid=self.projects[i].project_id,
                 lst=tasks,
             )
-
-    def __fill_tasks_qlist_dict(self):
-        for project in self.projects:
-            sub_qlist = QListWidget()
-            sub_qlist.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-            sub_qlist.setSpacing(1)
-
-            for i, sub in enumerate(project.tasks):
-                # TODO: try the inverse method, where the timers are in a dict here {sub_id -> timer}
-                #  and
-                sub.timer = sub_qlist
-                item = QListWidgetItem(sub_qlist)
-                item.setData(Qt.ItemDataRole.UserRole, tuple([project, i]))
-                item.setText(sub.description)
-                sub_qlist.addItem(item)
-                sub_qlist.setItemWidget(item, sub.timer)
-
-            self.tasks_qlist_dict[project.project_id] = sub_qlist
-        pass
 
     def __fill_projects_qlist(self):
         self.projects_list_widget = QListWidget()
@@ -438,52 +413,120 @@ class MainApp(QMainWindow):
     def __show_project_ui(self, item, ):
         project = item.data(Qt.ItemDataRole.UserRole)
 
-        self.lbl_pr_name.setText(utils.extract_before_from(self.lbl_pr_name.text(), ': ') + project.name)
-
-        self.lbl_pr_state.setText(utils.extract_before_from(self.lbl_pr_state.text(), ': ') + project.status)
-
         for key in self.tasks_qlist_dict.keys():
             self.tasks_qlist_dict[key].hide()
 
         self.sub_projects_layout.addWidget(self.tasks_qlist_dict[project.project_id])
         self.tasks_qlist_dict[project.project_id].show()
-
-        # self.tasks_qlist_dict[project.project_id].itemClicked.connect(self.__start_timer)
         self.tasks_qlist_dict[project.project_id].itemClicked.connect(self.__start_timer)
         self.tasks_qlist_dict[project.project_id].itemChanged.connect(self.__pause_timer)
         self.tasks_qlist_dict[project.project_id].itemDoubleClicked.connect(self.__pause_timer)
 
+    def __fill_tasks_qlist_dict(self):
+        for project in self.projects:
+            sub_qlist = QListWidget()
+            sub_qlist.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            sub_qlist.setSpacing(1)
+
+            df = db.execute(
+                SQLs.SELECT_TASKID_AND_DURATION_AND_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE.format(
+                    user=self.user.sync_id,
+                    project_id=project.project_id,
+                    today=datetime.today().strftime('%Y%m%d')
+                ), conn_s=db.CONN)
+
+            if not df.empty:
+                df.duration = pd.to_timedelta(df.duration)
+                df.sub_id = pd.to_numeric(df.sub_id)
+                df = df.groupby('sub_id').sum()
+
+            for i, sub in enumerate(project.tasks):
+
+                timeline = db_models.ProjectTimeLine(
+                    project_id=project.project_id,
+                    sub_id=sub.sub_id,
+                    user=self.user.sync_id,
+                )
+                if not df.empty and int(sub.sub_id) in df.index.astype(int):
+                    timeline.duration = df.loc[int(sub.sub_id), 'duration']
+
+                self.tasks_timers_dict[sub.sub_id] = models.CustomTimer(
+                    timeline,
+                )
+
+                self.tasks_timers_dict[sub.sub_id].attach(sub.sub_id)
+
+                item = QListWidgetItem(sub_qlist)
+                item.setData(Qt.ItemDataRole.UserRole, sub)
+                item.setText(sub.description)
+                sub_qlist.addItem(item)
+                sub_qlist.setItemWidget(item, self.tasks_timers_dict[sub.sub_id])
+
+            self.tasks_qlist_dict[project.project_id] = sub_qlist
+
+        pass
+
     def __start_timer(self, item):
-        project, task_idx = item.data(Qt.ItemDataRole.UserRole)
-        self.lbl_pr_active_task.setText(
-            utils.extract_before_from(self.lbl_pr_active_task.text(), ': ') + project.tasks[task_idx].description
+        task = item.data(Qt.ItemDataRole.UserRole)
+
+        project_name = utils.pid_filter(
+            task.project_id,
+            self.projects
+        )[0].name
+
+        df = db.execute(SQLs.SELECT_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE.format(
+            user=self.user.user_id,
+            project_id=task.project_id,
+            today=datetime.today().strftime('%Y%m%d')
+        ), conn_s=db.CONN)
+
+        df.duration = pd.to_timedelta(df.duration)
+
+        self.lbl_pr_name.setText(
+            utils.extract_before_from(self.lbl_pr_name.text(), ': ') + project_name
         )
-        # TODO: activate this lbl
-        # title_total_time_pr = self.lbl_pr_total_time.text()[:self.lbl_pr_total_time.text().find(': ') + 2]
-        # self.lbl_pr_total_time.setText(self.active_sub_projects[temp.sub_id].timer.label)
+        self.lbl_pr_active_task.setText(
+            utils.extract_before_from(self.lbl_pr_active_task.text(), ': ') + task.description
+        )
 
-        for pro in self.projects:
-            for tsk in pro.tasks:
-                if tsk.timer.flag:
-                    tsk.timer.pause()
+        self.lbl_pr_total_time.setText(
+            utils.extract_before_from(self.lbl_pr_total_time.text(), ': ') + str(df.duration.sum())[-8:]
+        )
 
-        project.tasks[task_idx].timer.start()
-        project.tasks[task_idx].timer.show_time(mode='display')
+        self.lbl_task_timer.setText(
+            utils.extract_before_from(self.lbl_task_timer.text(), ': ') + str(timedelta(seconds=0))
+        )
+
+        for sub_id in self.tasks_timers_dict:
+            if self.tasks_timers_dict[sub_id].flag and task.sub_id != sub_id:
+                self.tasks_timers_dict[sub_id].pause()
+
+        self.tasks_timers_dict[task.sub_id].start()
+
+        self.tasks_timers_dict[task.sub_id].show_time(mode='display')
         pass
 
     def __pause_timer(self, item):
-        project, task_idx = item.data(Qt.ItemDataRole.UserRole)
-        project.tasks[task_idx].timer.pause()
-        project.tasks[task_idx].timer.show_time(mode='display')
+        task = item.data(Qt.ItemDataRole.UserRole)
+        self.tasks_timers_dict[task.sub_id].pause()
+        self.tasks_timers_dict[task.sub_id].show_time(mode='display')
         pass
+
+    def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
+        super().closeEvent(a0)
+        for sub_id in self.tasks_timers_dict:
+            if self.tasks_timers_dict[sub_id].flag:
+                self.tasks_timers_dict[sub_id].pause()
 
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
+    db.initiate_database(db.CONN)
 
+    app = QApplication(sys.argv)
     form = LoginForm()
+
     if not os.path.exists(consts.REMEMBER_ME_FILE_PATH):
         form.show()
 
-    # sys.exit(app.exec())
+    db.CONN.close()
     sys.exit(app.exec())

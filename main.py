@@ -1,20 +1,21 @@
+import os
 import sys
 
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication
 
-from views import MainApp
+import consts
+import views
 
 
 def main(args):
-    app = QApplication(args)
-    ex = MainApp(
-        title='ActivityWatchTimeTracker',
-        left=100,
-        top=100,
-        height=500,
-    )
-    ex.show()
-    sys.exit(app.exec_())
+    app = QApplication(sys.argv)
+
+    form = views.LoginForm()
+    if not os.path.exists(consts.REMEMBER_ME_FILE_PATH):
+        form.show()
+
+    # sys.exit(app.exec())
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':

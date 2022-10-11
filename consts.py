@@ -8,6 +8,10 @@ UNHIDDEN_EYE_ICON_PATH = './assets/hidden_eye.png'
 
 OUTPUT_DIR = './run'
 
+DB_CONFIG_DIR = './env/'
+DB_HOST_FILE_NAME = 'local'
+DB_PATH = './env/local.db'
+
 PROJECTS_LISTWIDGET_STYLESHEET = """
     QListWidget {
         background: palette(window);
