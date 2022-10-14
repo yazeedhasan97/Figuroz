@@ -1,4 +1,5 @@
 import os
+import pickle
 from datetime import datetime, timezone
 from typing import Union
 
@@ -15,6 +16,23 @@ logger = logging.getLogger(__name__)
 ConvertibleTimestamp = Union[datetime, str]
 
 
+def remember_me(user, path):
+    with open(path, 'bw') as file:
+        pickle.dump(user, file)
+
+
+def get_me(path):
+    if os.path.exists(path):
+        with open(path, 'rb') as file:
+            user = pickle.load(file)
+        if user is not None:
+            return user
+        else:
+            return None
+    else:
+        return None
+
+
 def check_if_midnight():
     now = datetime.now()
     seconds_since_midnight = (now - now.replace(hour=0, minute=0, second=0, microsecond=0)).total_seconds()
@@ -28,6 +46,10 @@ def take_screenshot():
 
 def pid_filter(pid, lst):
     return list(filter(lambda x: x.project_id == pid, lst))
+
+
+def sub_id_filter(pid, lst):
+    return list(filter(lambda x: x.sub_id == pid, lst))
 
 
 def extract_before_from(text: str, find: str):

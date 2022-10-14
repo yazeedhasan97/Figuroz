@@ -1,5 +1,7 @@
 REMEMBER_ME_FILE_PATH = './env/user.pkl'
 
+REMEMBER_LAST_ACTIVE_FILE_PATH = './env/last_active.pkl'
+
 START_ICON_PATH = './assets/play_icon_16.png'
 PAUSE_ICON_PATH = './assets/pause_icon_16.png'
 

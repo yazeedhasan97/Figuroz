@@ -418,9 +418,7 @@ class ProjectTimeLine(Model):
             day_format=self.day_format,
 
         )
-        print(sql)
         res = db.execute(sql, conn_s=db.CONN)
-        print(res)
         pass
 
 

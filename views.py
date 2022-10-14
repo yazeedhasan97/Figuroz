@@ -188,7 +188,7 @@ class LoginForm(QWidget):
         )
 
         if self.remember_me.isChecked():
-            self.__rememberMe(user)
+            utils.remember_me(user, consts.REMEMBER_ME_FILE_PATH)
 
         self.next_screen(user)
 
@@ -205,25 +205,13 @@ class LoginForm(QWidget):
         pass
 
     def __try_remember_me_login(self, ):
-        if os.path.exists(consts.REMEMBER_ME_FILE_PATH):
-            user = self.__getMe()
-            if user is None or not user.email_address:
-                return None
-            else:
-                self.next_screen(user)
-                return True
-        else:
+        user = utils.get_me(consts.REMEMBER_ME_FILE_PATH)
+        if user is None or not user.email_address:
             return None
+        else:
+            self.next_screen(user)
+            return True
         pass
-
-    def __rememberMe(self, user):
-        with open(consts.REMEMBER_ME_FILE_PATH, 'bw') as file:
-            pickle.dump(user, file)
-
-    def __getMe(self):
-        with open(consts.REMEMBER_ME_FILE_PATH, 'rb') as file:
-            user = pickle.load(file)
-        return user
 
     def next_screen(self, user):
 
@@ -249,6 +237,7 @@ class LoginForm(QWidget):
 
 
 class MainAppA(QMainWindow):
+    # TODO: work to remove the double click behavior
 
     def __init__(self, title, left, top, height, parent=None, user=None):
         super(MainAppA, self).__init__(parent)
@@ -257,11 +246,13 @@ class MainAppA(QMainWindow):
         self.user = user
         self.parent = parent
 
-        self.active_event = None
         self.tasks_qlist_dict = {}
         self.tasks_timers_dict = {}
         self.projects = []
-        # self.events = models.Event() # TODO: should this be here?
+        self.projects_time_trackers = {}
+        self.active_project = None
+        self.active_task = None
+        self.duration = timedelta(seconds=0)
 
         self.__init_data()
 
@@ -271,6 +262,8 @@ class MainAppA(QMainWindow):
 
         self.__fill_projects_qlist()
         self.__fill_tasks_qlist_dict()
+
+        self.__fill_with_last_active_project()
 
     def __create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -320,17 +313,23 @@ class MainAppA(QMainWindow):
 
         # Define The Project Description Layout
         title_layout = QGridLayout()
-        self.lbl_pr_name = QLabel('Active Project: ')
-        title_layout.addWidget(self.lbl_pr_name, 0, 0)
+        self.lbl_active_project = QLabel('Active Project: ')
+        title_layout.addWidget(self.lbl_active_project, 0, 0)
 
-        self.lbl_pr_active_task = QLabel('Active Task: ')
-        title_layout.addWidget(self.lbl_pr_active_task, 1, 0)
+        self.lbl_total_time = QLabel('Project Timer: ', )
+        title_layout.addWidget(self.lbl_total_time, 0, 1)
 
-        self.lbl_task_timer = QLabel('Task Timer: ')
-        title_layout.addWidget(self.lbl_task_timer, 1, 1)
+        self.lbl_active_task = QLabel('Active Task: ')
+        title_layout.addWidget(self.lbl_active_task, 1, 0)
 
-        self.lbl_pr_total_time = QLabel('Project Timer: ', )
-        title_layout.addWidget(self.lbl_pr_total_time, 0, 1)
+        self.lbl_task_time = QLabel('Task Timer: ')
+        title_layout.addWidget(self.lbl_task_time, 1, 1)
+
+        self.lbl_project_time_tracker = models.TimeTracker()
+        title_layout.addWidget(self.lbl_project_time_tracker, 0, 2)
+        #
+        self.lbl_task_time_tracker = models.TimeTracker()
+        title_layout.addWidget(self.lbl_task_time_tracker, 1, 2)
 
         layout.addLayout(title_layout, 0, 1)
 
@@ -411,7 +410,28 @@ class MainAppA(QMainWindow):
         self.projects_list_widget.itemClicked.connect(self.__show_project_ui)
 
     def __show_project_ui(self, item, ):
-        project = item.data(Qt.ItemDataRole.UserRole)
+        if type(item) is not db_models.Project:
+            project = item.data(Qt.ItemDataRole.UserRole)
+            print(item.text())
+        else:
+            # self.active_project = item
+            project = item
+            self.lbl_active_project.setText(
+                utils.extract_before_from(self.lbl_active_project.text(), ': ') + project.name
+            )
+
+        # Collect Durations from the DB
+        df = db.execute(SQLs.SELECT_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE.format(
+            user=self.user.sync_id,
+            project_id=project.project_id,
+            today=datetime.today().strftime('%Y%m%d')
+        ), conn_s=db.CONN)
+        self.duration = pd.to_timedelta(df.duration).sum()
+
+        if type(item) is db_models.Project:  # if and only if reloaded from remember me
+            self.lbl_project_time_tracker.reset(
+                self.duration
+            )
 
         for key in self.tasks_qlist_dict.keys():
             self.tasks_qlist_dict[key].hide()
@@ -467,56 +487,81 @@ class MainAppA(QMainWindow):
         pass
 
     def __start_timer(self, item):
+        # Receive the Task
         task = item.data(Qt.ItemDataRole.UserRole)
 
-        project_name = utils.pid_filter(
-            task.project_id,
-            self.projects
-        )[0].name
+        if self.active_task is not None and self.active_project is not None:
+            if self.active_project.project_id == task.project_id:
+                self.duration = self.lbl_project_time_tracker.time
 
-        df = db.execute(SQLs.SELECT_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE.format(
-            user=self.user.user_id,
-            project_id=task.project_id,
-            today=datetime.today().strftime('%Y%m%d')
-        ), conn_s=db.CONN)
-
-        df.duration = pd.to_timedelta(df.duration)
-
-        self.lbl_pr_name.setText(
-            utils.extract_before_from(self.lbl_pr_name.text(), ': ') + project_name
-        )
-        self.lbl_pr_active_task.setText(
-            utils.extract_before_from(self.lbl_pr_active_task.text(), ': ') + task.description
-        )
-
-        self.lbl_pr_total_time.setText(
-            utils.extract_before_from(self.lbl_pr_total_time.text(), ': ') + str(df.duration.sum())[-8:]
-        )
-
-        self.lbl_task_timer.setText(
-            utils.extract_before_from(self.lbl_task_timer.text(), ': ') + str(timedelta(seconds=0))
-        )
-
+        # Make sure all other timers are paused before activating a new timer
         for sub_id in self.tasks_timers_dict:
             if self.tasks_timers_dict[sub_id].flag and task.sub_id != sub_id:
                 self.tasks_timers_dict[sub_id].pause()
 
-        self.tasks_timers_dict[task.sub_id].start()
+        self.lbl_project_time_tracker.reset(self.duration)
+        self.lbl_project_time_tracker.start()
 
+        # Activate the Task TimeTracker in the titles grid
+        self.lbl_task_time_tracker.reset(self.tasks_timers_dict[task.sub_id].time)
+        self.lbl_task_time_tracker.start()
+
+        # Activate the actual timer
+        self.tasks_timers_dict[task.sub_id].start()
         self.tasks_timers_dict[task.sub_id].show_time(mode='display')
-        pass
+
+        # Retrieve the project
+        self.active_project = utils.pid_filter(
+            task.project_id,
+            self.projects
+        )[0]
+        self.active_task = task
+
+        # Fill the titles
+        self.lbl_active_project.setText(
+            utils.extract_before_from(self.lbl_active_project.text(), ': ') + self.active_project.name
+        )
+        self.lbl_active_task.setText(
+            utils.extract_before_from(self.lbl_active_task.text(), ': ') + task.description
+        )
 
     def __pause_timer(self, item):
         task = item.data(Qt.ItemDataRole.UserRole)
         self.tasks_timers_dict[task.sub_id].pause()
+        self.lbl_task_time_tracker.pause()
+        self.lbl_project_time_tracker.pause()
+        # self.duration = self.lbl_project_time_tracker.time
+        # print('Duration in the Pause', self.duration)
+        # print('Appeared Duration in Pause', self.duration)
         self.tasks_timers_dict[task.sub_id].show_time(mode='display')
         pass
 
     def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
-        super().closeEvent(a0)
         for sub_id in self.tasks_timers_dict:
             if self.tasks_timers_dict[sub_id].flag:
                 self.tasks_timers_dict[sub_id].pause()
+        utils.remember_me(
+            self.active_project,
+            consts.REMEMBER_LAST_ACTIVE_FILE_PATH
+        )
+
+        super().closeEvent(a0)
+
+    def __fill_with_last_active_project(self):
+        msg = QMessageBox()
+        project = utils.get_me(consts.REMEMBER_LAST_ACTIVE_FILE_PATH)
+
+        if project is None or not project.project_id:
+            msg.setText('Failed to load project as nothing was saved.')
+            msg.exec()
+            return None
+
+        if not utils.pid_filter(project.project_id, self.projects):
+            msg.setText('Failed to load project as it was removed from the database.')
+            msg.exec()
+            return None
+
+        self.__show_project_ui(project)
 
 
 if __name__ == '__main__':

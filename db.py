@@ -97,7 +97,7 @@ class StaticDBConnection(metaclass=Singleton):
         return tables_df
 
     def select(self, query, chunksize=None):
-        print(f'Executing SELECT query in progress...')
+        print(f'Executing \n{query}\n in progress...')
         try:
             query_df = pd.read_sql(query, self.engine, chunksize=chunksize).convert_dtypes(convert_string=False)
         except Exception as e:
@@ -117,7 +117,7 @@ class StaticDBConnection(metaclass=Singleton):
         return True
 
     def generic_query(self, sql):
-        print(f'Executing {sql}in progress...')
+        print(f'Executing \n{sql}\n in progress...')
         conn = None
         try:
             conn = self.engine.connect()
@@ -212,13 +212,13 @@ def execute(sql: str, conn_s: StaticDBConnection = None, path: str = None, host:
         conn = create_db_connection(host_config=host, config_path=path)
     else:
         conn = conn_s
-    print('-' * 99)
-    print(sql)
+
     print('-' * 99)
     if sql.strip().lower().startswith('select'):
         data = conn.select(sql)
     else:
         data = conn.generic_query(sql)
+    print('-' * 99)
 
     if conn_s is None:
         conn.close()
