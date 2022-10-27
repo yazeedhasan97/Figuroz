@@ -1,18 +1,15 @@
 import logging
 import numbers
-import sys
 
 from datetime import timedelta, datetime, timezone
 from typing import Union, Dict, Any, Optional, cast
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QLabel, QWidget, QHBoxLayout, QStyledItemDelegate, QStyleOptionViewItem, QApplication
+from PyQt6.QtWidgets import QLabel, QWidget, QHBoxLayout, QStyledItemDelegate, QStyleOptionViewItem
 
-import consts
-import db_models
-import utils
-from controllers import Observed
+from scripts import consts, utils
+from scripts.controllers import Observed
 
 logger = logging.getLogger(__name__)
 
@@ -141,14 +138,14 @@ class CustomTimer(QWidget, Observed, metaclass=CustomTimerMeta):  #
     def notify(self, ids: dict, state='create') -> None:
         """ Notify all observers about an event."""
         if state == 'create':
-            self._flag_observers[ids['sub_id']].create(ids)
+            self._observers[ids['sub_id']].create(ids)
         elif state == 'update':
-            self._flag_observers[ids['sub_id']].update()
+            self._observers[ids['sub_id']].update()
         else:
             pass
         pass
 
-    def __init__(self, time_line: db_models.ProjectTimeLine, timer: QTimer = None, label: QLabel = None,
+    def __init__(self, time_line, timer: QTimer = None, label: QLabel = None,
                  icon: QLabel = None, extra: QLabel = None):
         super(CustomTimer, self).__init__()
         self.__flag = False
@@ -407,18 +404,4 @@ class TimeTracker(QWidget):
 
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    # form = CustomTimer(
-    #     db_models.ProjectTimeLine(
-    #         project_id=10,
-    #         sub_id=1,
-    #         user=182,
-    #     )
-    #
-    # )
-    form = SimpleTimer()
-
-    form.show()
-    # e = Event()
-    sys.exit(app.exec())
     pass

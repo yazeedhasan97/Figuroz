@@ -1,7 +1,10 @@
-
 PyQt6
 sshtunnel
 sqlalchemy
 sqlalchemy-utils
 pandas
 iso8601
+Pillow
+requests
+geocoder
+watchdog

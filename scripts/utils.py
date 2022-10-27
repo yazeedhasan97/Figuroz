@@ -2,12 +2,10 @@ import os
 import pickle
 from datetime import datetime, timezone
 from typing import Union
-
 import iso8601
 import pandas as pd
-
-import consts
-from PIL import ImageGrab
+import geocoder
+from PIL import ImageGrab, ImageFilter
 
 import logging
 
@@ -39,17 +37,30 @@ def check_if_midnight():
     return seconds_since_midnight == 0
 
 
-def take_screenshot():
+def convert_file_to_binary(filename):
+    # Convert digital data to binary format
+    with open(filename, 'rb') as file:
+        return file.read()
+
+
+def take_screenshot(save_path, blur=False, blur_deep=4):
     snapshot = ImageGrab.grab()
-    snapshot.save(os.path.join(consts.OUTPUT_DIR, f'./Image_{datetime.now():%Y%m%d_%H%H%S}.png'))
+    if blur:
+        snapshot = snapshot.filter(ImageFilter.BoxBlur(blur_deep))
+
+    path = os.path.join(save_path, f'./Image_{datetime.now():%Y%m%d_%H%M%S}.png')
+    snapshot.save(path)
+    return convert_file_to_binary(path), snapshot.width, snapshot.height
 
 
-def pid_filter(pid, lst):
-    return list(filter(lambda x: x.project_id == pid, lst))
+def id_filter(pid, lst, compare=None):
+    if compare == 'pid':
+        return list(filter(lambda x: x.project_id == pid, lst))
+    return list(filter(lambda x: x.id == pid, lst))
 
 
-def sub_id_filter(pid, lst):
-    return list(filter(lambda x: x.sub_id == pid, lst))
+# def sub_id_filter(pid, lst):
+#     return list(filter(lambda x: x.sub_id == pid, lst))
 
 
 def extract_before_from(text: str, find: str):
@@ -77,5 +88,17 @@ def timestamp_parse(ts_in: ConvertibleTimestamp) -> datetime:
 def create_df_from_object(obj):
     df = pd.DataFrame(obj).T
     df.columns = df.iloc[0]
-    df = df.drop(df.index, )
+    df = df.drop(0, ).reset_index(drop=True)
     return df
+
+
+# def calculate_internet_speed():
+#     internet = speedtest.Speedtest()
+#     return internet.download(), internet.upload()
+
+def get_user_location(user='me'):
+    return geocoder.ip(user).latlng
+
+
+if __name__ == "__main__":
+    print(get_user_location())
