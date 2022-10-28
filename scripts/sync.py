@@ -1,8 +1,10 @@
 import pandas as pd
+import numpy as np
 import requests
-import json
+
 from datetime import timedelta
-from scripts import db_models, db, consts, utils, SQLs
+from scripts import db, consts, utils, SQLs
+from scripts.models import User, Task, Project
 from scripts.controllers import MainController
 
 
@@ -78,7 +80,7 @@ class Sync:
             if str(response.status_code)[:-1] in Sync.__ACCEPTED_STATUS_CODE:
                 res = response.json()
                 Sync.__HEADERS['Authorization'] = "Bearer " + res['token']
-                user = db_models.User(
+                user = User(
                     token=res['token'],
                     refresh_token=res['refreshToken'],
                     id=res['user']['id'],
@@ -141,7 +143,7 @@ class Sync:
             # response.raise_for_status()
             if str(response.status_code)[:-1] in Sync.__ACCEPTED_STATUS_CODE:
                 projects_lst = response.json()
-                projects = [db_models.Project(
+                projects = [Project(
                     id=project['id'],
                     name=project['projectName'].title(),
                     company_id=project['companyId'],
@@ -186,7 +188,7 @@ class Sync:
             # response.raise_for_status()
             if str(response.status_code)[:-1] in Sync.__ACCEPTED_STATUS_CODE:
                 tasks_lst = response.json()
-                tasks = [db_models.Task(
+                tasks = [Task(
                     project_id=task['projectId'],
                     id=task['id'],
                     status=task['status'],
@@ -206,7 +208,7 @@ class Sync:
             if response is not None:
                 response.close()
 
-    @classmethod  # TODO: needs mre consideration
+    @classmethod  # TODO: needs more consideration
     def get_user_sync_flag_request(cls, email_address, password, token):  # TODO: not sure we need this API.
         print('Get Projects Request')
         Sync.__HEADERS['Authorization'] = "Bearer " + token
@@ -249,23 +251,32 @@ class Sync:
         response = None
         df = db.execute(SQLs.SELECT_ALL_TIMELINES_WHERE_USER_AND_SYNC_IS_ZERO.format(
             user=user.id
-        ), conn_s=MainController.DB_CONNECTION)
+        ), conn_s=MainController.DB_CONNECTION).convert_dtypes(infer_objects=True, )
+        # print(df.info())
+        # df['project_id'] = df['project_id'] .astype(np.int64)
+        # df['sub_id'] = df['sub_id'] .astype(np.int64)
+        # df['user'] = df['user'] .astype(np.int64)
+        # df['sync'] = df['sync'] .astype(np.int64)
+        # MainController.DB_CONNECTION.write(df.convert_dtypes(), 'ProjectTimeLine', if_exists='replace')
+        # print(df.info())
         data = df.drop(
             ['project_id', 'current_project_line_id', 'sync', 'day_format', 'time_start', 'time_end'],
             axis=1
         )
+
         data.columns = ["taskId", "userId", "id", "duration", "startDate"]
-        data['startDate'] = pd.to_datetime(data['startDate']).dt.strftime('%Y-%m-%dT%H:%M:%S')
+        data['startDate'] = pd.to_datetime(data['startDate']).dt.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
         data['duration'] = pd.to_timedelta(data['duration']).fillna(timedelta(seconds=0))
-        data['endDate'] = (pd.to_datetime(data['startDate']) + data['duration']).dt.strftime('%Y-%m-%dT%H:%M:%S')
+        data['endDate'] = (pd.to_datetime(data['startDate']) + data['duration']).dt.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
         data['detailStatus'] = 0
 
         data[['startDate', 'endDate']] = data[['startDate', 'endDate']].astype(str)
-        data['duration'] = data['duration'] / pd.Timedelta(seconds=1)
+        data['duration'] = (data['duration'] / pd.Timedelta(seconds=1)).astype(np.int64)
         data = data[
             ['id', 'startDate', 'endDate', 'duration', 'detailStatus', 'userId', 'taskId', ]  # 'userTaskDurationId',
-        ].convert_dtypes().to_dict('records')
+        ].drop_duplicates().to_dict('records')
 
+        print(data)
         try:
             response = requests.post(
                 url=Sync.__INSERT_TIMELINES_URL,
@@ -273,6 +284,9 @@ class Sync:
                 timeout=Sync.__TIMEOUT,
                 headers=Sync.__HEADERS
             )
+            print(response.url)
+            print(response.headers)
+
             # response.raise_for_status()
             if str(response.status_code)[:-1] in Sync.__ACCEPTED_STATUS_CODE:
                 df['sync'] = 1

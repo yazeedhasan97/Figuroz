@@ -12,9 +12,11 @@ from PyQt6.QtWidgets import QWidget, QListWidget, QGridLayout, \
 from PyQt6.QtGui import QIcon, QAction
 
 from scripts import db, utils, consts, SQLs
-from scripts import db_models, models
-from scripts.controllers import MainController
+from scripts.models import User, Task, Project, ProjectTimeLine
+from scripts.controllers import MainController, Periodic
 from scripts.sync import Sync
+
+from scripts.custom_views import QClickableLabel, TimeTracker, CustomTimer
 
 
 class ForgetPasswordForm(QWidget):
@@ -139,7 +141,7 @@ class LoginForm(QWidget):
         self.remember_me.setStyleSheet(consts.SMALLER_QLabel_STYLESHEET)
         layout.addWidget(self.remember_me, 2, 0)
 
-        label_forget_password = models.QClickableLabel('Forget Password?', self.forget_password, )
+        label_forget_password = QClickableLabel('Forget Password?', self.forget_password, )
         label_forget_password.setStyleSheet(consts.SMALLER_QLabel_STYLESHEET)
         layout.addWidget(label_forget_password, 2, 3)
 
@@ -230,7 +232,7 @@ class LoginForm(QWidget):
                 msg.exec()
                 return
 
-            user = [db_models.User(
+            user = [User(
                 token=a.token,
                 refresh_token=a.refresh_token,
                 id=a.id,
@@ -294,7 +296,6 @@ class LoginForm(QWidget):
 
 
 class MainAppA(QMainWindow):
-    # TODO: work to remove the double click behavior
 
     def __init__(self, title, left, top, height, parent=None, user=None):
         super(MainAppA, self).__init__(parent)
@@ -322,6 +323,9 @@ class MainAppA(QMainWindow):
         self.__fill_tasks_qlist_dict()
 
         self.__fill_with_last_active_project()
+
+        if self.user.sync_data:  # TODO: ned the interval of updates
+            Periodic(consts.DURATIONS_UPLOAD_INTERVAL, lambda: Sync.update_project_timelines_request(user=self.user))
 
         # if settings.take_screenshots:
         #     # TODO: time intervals should be from the DB
@@ -393,10 +397,10 @@ class MainAppA(QMainWindow):
         # self.lbl_project_time_tracker = models.TimeTracker()
         # title_layout.addWidget(self.lbl_project_time_tracker, 0, 2)
 
-        self.lbl_task_time_tracker = models.TimeTracker()
+        self.lbl_task_time_tracker = TimeTracker()
         title_layout.addWidget(self.lbl_task_time_tracker, 1, 1)
 
-        self.lbl_total_time_tracker = models.TimeTracker()
+        self.lbl_total_time_tracker = TimeTracker()
         title_layout.addWidget(self.lbl_total_time_tracker, 2, 3)
 
         layout.addLayout(title_layout, 0, 0, 2, 3)
@@ -429,7 +433,7 @@ class MainAppA(QMainWindow):
                 return
 
             print('Projects data successfully loaded from the local database')
-            self.projects = [db_models.Project(
+            self.projects = [Project(
                 id=a.id,
                 name=a.projectName.title(),
                 status=a.status,
@@ -462,7 +466,7 @@ class MainAppA(QMainWindow):
                 return
 
             print('Tasks data successfully loaded from the local database')
-            tasks = [db_models.Task(
+            tasks = [Task(
                 project_id=a.projectId,
                 id=a.id,
                 status=a.status,
@@ -508,7 +512,7 @@ class MainAppA(QMainWindow):
         self.lbl_total_time_tracker.reset(pd.to_timedelta(df.duration).sum())
 
     def __show_project_ui(self, item, ):
-        if type(item) is not db_models.Project:
+        if type(item) is not Project:
             project = item.data(Qt.ItemDataRole.UserRole)
             print(item.text())
         else:
@@ -558,7 +562,7 @@ class MainAppA(QMainWindow):
 
             for task in project.tasks:
 
-                timeline = db_models.ProjectTimeLine(
+                timeline = ProjectTimeLine(
                     project_id=project.id,
                     sub_id=task.id,
                     user=self.user.id,
@@ -566,7 +570,7 @@ class MainAppA(QMainWindow):
                 if not df.empty and int(task.id) in df.index.astype(int):
                     timeline.duration = df.loc[int(task.id), 'duration']
 
-                self.tasks_timers_dict[task.id] = models.CustomTimer(timeline, )
+                self.tasks_timers_dict[task.id] = CustomTimer(timeline, )
 
                 self.tasks_timers_dict[task.id].attach(task.id)
 
@@ -620,10 +624,11 @@ class MainAppA(QMainWindow):
     def __pause_timer(self, item):
         task = item.data(Qt.ItemDataRole.UserRole)
         self.tasks_timers_dict[task.id].pause()
-        self.lbl_task_time_tracker.pause()
-        # self.lbl_project_time_tracker.pause()
-        self.lbl_total_time_tracker.pause()
         self.tasks_timers_dict[task.id].show_time(mode='display')
+        self.lbl_task_time_tracker.pause()
+        self.lbl_total_time_tracker.pause()
+        # self.lbl_project_time_tracker.pause()
+
         pass
 
     def closeEvent(self, a0: QtGui.QCloseEvent) -> None:

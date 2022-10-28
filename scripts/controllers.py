@@ -3,12 +3,32 @@ import time
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from scripts import db_models
+from scripts import models
 
 from threading import Timer, Lock
 
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
-# from watchdog.observers import Observer
+from scripts.models import ProjectTimeLine
+
+
+class MainController:
+    Settings = None
+    DB_CONNECTION = None
+
+    @classmethod
+    def initiate_settings(cls, settings):
+        MainController.Settings = settings
+
+    @classmethod
+    def initiate_database_connection(cls, conn):
+        MainController.DB_CONNECTION = conn
+
+    @classmethod
+    def close_database_connection(cls, ):
+        MainController.DB_CONNECTION.close()
+
 
 class Periodic:
     """
@@ -54,13 +74,37 @@ class AbstractObserver(ABC):
         pass
 
 
+class AbstractObserved(ABC):
+    """ The Subject interface declares a set of methods for managing subscribers. """
+    _state = None
+    _observers = {}
+
+    @abstractmethod
+    def attach(self, id) -> None:
+        pass
+
+    def detach(self, id) -> None:
+        """ Detach an observer from the subject."""
+        print(f'Task{id} Detach From Observer.')
+        try:
+            self._observers.pop(id, None)
+        except ValueError:
+            print(f'Task{id} Not found in observers.')
+        pass
+
+    @abstractmethod
+    def notify(self, ids, state='create') -> None:
+        """ Notify all observers about an event."""
+        pass
+
+
 class TimerObserver(AbstractObserver):
     _tracker = None
     _start = None
 
     def create(self, ids: dict) -> None:
         print('Create The Time Line')
-        self._tracker = db_models.ProjectTimeLine(
+        self._tracker = ProjectTimeLine(
             project_id=ids['project_id'],
             sub_id=ids['sub_id'],
             user=ids['user'],
@@ -83,58 +127,162 @@ class TimerObserver(AbstractObserver):
         pass
 
 
-class Observed(ABC):
+class ObservedTimer(AbstractObserved):
     """ The Subject interface declares a set of methods for managing subscribers. """
     _state = None
     _observers = {}
 
-    def attach(self, sub_id) -> None:
+    def attach(self, id) -> None:
         """ Attach an observer to the subject. """
-        print(f'Task{sub_id} Attached To Observer.')
-        self._observers[sub_id] = TimerObserver()
-
+        print(f'Task{id} Attached To Observer.')
+        self._observers[id] = TimerObserver()
         pass
 
-    def detach(self, sub_id) -> None:
-        """ Detach an observer from the subject."""
-        print(f'Task{sub_id} Detach From Observer.')
+    def notify(self, ids: dict, state='create') -> None:
+        """ Notify all observers about an event."""
+        if state == 'create':
+            self._observers[ids['sub_id']].create(ids)
+        elif state == 'update':
+            self._observers[ids['sub_id']].update()
+        else:
+            pass
+        pass
+
+
+# TODO: Activate ScreenShot Observer
+# TODO: Activate ScreenShot Periodic
+class ScreenShotDirectoryWatcher:
+    def __init__(self, directory):
+        self.observer = Observer()
+        self.__directory = directory
+
+    def __get_directory(self):
+        return self.__directory
+
+    def __set_directory(self, directory):
+        self.__directory = directory
+
+    def __del_directory(self, ):
+        self.__directory = None
+
+    directory = property(
+        fset=__set_directory,
+        fget=__get_directory,
+        fdel=__del_directory,
+    )
+
+    def run(self, recursive=True):
+        event_handler = ScreenShotDirectoryHandler()
+        self.observer.schedule(event_handler, self.__directory, recursive=recursive)
+        self.observer.start()
         try:
-            self._observers.pop(sub_id, None)
-        except ValueError:
-            print(f'Task{sub_id} Not found in observers.')
+            while True:  # TODO: this is not needed in stoppable apps behaviour
+                time.sleep(3)
+        except Exception as e:
+            self.observer.stop()
+            print(e)
+            # raise e
+
+        self.observer.join()
+        return self
+
+
+class ScreenShotDirectoryHandler(FileSystemEventHandler):
+    @staticmethod
+    def on_any_event(event, **kwargs):
+        if event.is_directory:
+            return None
+
+        elif event.event_type == 'created':
+            # Take any action here when a file is first created.
+            path = event.src_path
+            print(f"Received created event - {path}.")
+            time.sleep(1)
+            try:
+                pass
+            except Exception as e:
+                print(e)
+                raise e
+
+        elif event.event_type == 'modified':
+            # Taken any action here when a file is modified.
+            path = event.src_path
+            print(f"Received modified event - {path}.")
+            time.sleep(1)
+            try:
+                pass
+            except Exception as e:
+                print(e)
+                raise e
+
+
+# TODO: Activate Apps Observer
+# TODO: Activate Apps Periodic
+class ApplicationObserver(AbstractObserver):
+    _tracker = None
+    _start = None
+
+    def update(self, ) -> None:
         pass
 
-    @abstractmethod
-    def notify(self, timeline, state='create') -> None:
+
+class ObservedApplication(AbstractObserved):
+    """ The Subject interface declares a set of methods for managing subscribers. """
+    _state = None
+    _observers = {}
+
+    def attach(self, id) -> None:
+        """ Attach an observer to the subject. """
+        pass
+
+    def notify(self, ids: dict, state='create') -> None:
         """ Notify all observers about an event."""
         pass
 
 
-
-# TODO: Activate Apps Observer
 # TODO: Activate URLs Observer
-# TODO: Activate IdelTime Observer
-# TODO: Activate ScreenShot Observer
-
-# TODO: Activate ScreenShot Periodic
-# TODO: Activate Apps Periodic
-# TODO: Activate Idel Time Periodic
 # TODO: Activate URLs Periodic
-# TODO: `Activate ProjectTimeLine Periodic
+class URLObserver(AbstractObserver):
+    _tracker = None
+    _start = None
+
+    def update(self, ) -> None:
+        pass
 
 
-class MainController:
-    Settings = None
-    DB_CONNECTION = None
+class ObservedURL(AbstractObserved):
+    """ The Subject interface declares a set of methods for managing subscribers. """
+    _state = None
+    _observers = {}
 
-    @classmethod
-    def initiate_settings(cls, settings):
-        MainController.Settings = settings
+    def attach(self, id) -> None:
+        """ Attach an observer to the subject. """
+        pass
 
-    @classmethod
-    def initiate_database_connection(cls, conn):
-        MainController.DB_CONNECTION = conn
+    def notify(self, ids: dict, state='create') -> None:
+        """ Notify all observers about an event."""
+        pass
 
-    @classmethod
-    def close_database_connection(cls, ):
-        MainController.DB_CONNECTION.close()
+
+# TODO: Activate Ideal Time Observer
+# TODO: Activate Ideal Time Periodic
+class IdealTimeObserver(AbstractObserver):
+    _tracker = None
+    _start = None
+
+    def update(self, ) -> None:
+        pass
+
+
+class ObservedIdealTime(AbstractObserved):
+    """ The Subject interface declares a set of methods for managing subscribers. """
+    _state = None
+    _observers = {}
+
+    def attach(self, id) -> None:
+        """ Attach an observer to the subject. """
+        pass
+
+    def notify(self, ids: dict, state='create') -> None:
+        """ Notify all observers about an event."""
+        pass
