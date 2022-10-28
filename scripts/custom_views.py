@@ -1,18 +1,14 @@
 import logging
-import numbers
-import sys
 
-from datetime import timedelta, datetime, timezone
-from typing import Union, Dict, Any, Optional, cast
+from datetime import timedelta, datetime
+from typing import Union, Dict, Any, Optional
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QLabel, QWidget, QHBoxLayout, QStyledItemDelegate, QStyleOptionViewItem, QApplication
+from PyQt6.QtWidgets import QLabel, QWidget, QHBoxLayout, QStyledItemDelegate, QStyleOptionViewItem
 
-import consts
-import db_models
-import utils
-from controllers import Observed
+from scripts import consts, utils
+from scripts.controllers import ObservedTimer
 
 logger = logging.getLogger(__name__)
 
@@ -42,114 +38,12 @@ class ItemDelegate(QStyledItemDelegate):
         super(ItemDelegate, self).paint(painter, option, index)
 
 
-class CustomTimerMeta(type(QWidget), type(Observed)):
+class CustomTimerMeta(type(QWidget), type(ObservedTimer)):
     pass
 
 
-class Event(dict):
-    """ Used to represents an event. """
-
-    def __init__(self, id: Id = None, timestamp: ConvertibleTimestamp = None, duration: Duration = timedelta(seconds=0),
-                 data: list = [], ) -> None:
-        super(Event, self).__init__()
-
-        self.id = id
-        if timestamp is None:
-            logger.warning("Event initializer did not receive a timestamp argument, using now as timestamp")
-            self.timestamp = datetime.now(cast(timezone, timezone.utc))
-        else:
-            # The conversion needs to be explicit here for mypy to pick it up (lacks support for properties)
-            self.timestamp = utils.timestamp_parse(timestamp)
-        self.duration = duration  # type: ignore
-        self.data = data.copy()
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, Event):
-            return (
-                    self.timestamp == other.timestamp
-                    and self.duration == other.duration
-                    and self.data == other.data
-            )
-        else:
-            raise TypeError(
-                "operator not supported between instances of '{}' and '{}'".format(type(self), type(other))
-            )
-
-    def __lt__(self, other: object) -> bool:
-        if isinstance(other, Event):
-            return self.timestamp < other.timestamp
-        else:
-            raise TypeError(
-                "operator not supported between instances of '{}' and '{}'".format(
-                    type(self), type(other)
-                )
-            )
-
-    @property
-    def id(self) -> Id:
-        return self["id"] if self._hasprop("id") else None
-
-    @id.setter
-    def id(self, id: Id) -> None:
-        self["id"] = id
-
-    @property
-    def data(self) -> dict:
-        return self["data"] if self._hasprop("data") else {}
-
-    @data.setter
-    def data(self, data, mode='+') -> None:
-        if type(data) is list and mode == '=':
-            self["data"] = data.copy()
-        elif type(data) is list and mode == '+':
-            self["data"].extends(data)
-        else:
-            self["data"].append(data)
-
-    @data.getter
-    def data(self, data: list) -> None:
-        return self["data"].copy()
-
-    @property
-    def timestamp(self) -> datetime:
-        return self["timestamp"]
-
-    @timestamp.setter
-    def timestamp(self, timestamp: ConvertibleTimestamp) -> None:
-        self["timestamp"] = utils.timestamp_parse(timestamp).astimezone(timezone.utc)
-
-    @property
-    def duration(self) -> timedelta:
-        return self["duration"] if self._hasprop("duration") else timedelta(0)
-
-    @duration.setter
-    def duration(self, duration: Duration) -> None:
-        if isinstance(duration, timedelta):
-            self["duration"] = duration
-        elif isinstance(duration, numbers.Real):
-            self["duration"] = timedelta(seconds=duration)  # type: ignore
-        else:
-            raise TypeError(f"Couldn't parse duration of invalid type {type(duration)}")
-
-    def _hasprop(self, param):
-        return param in self.__dict__.keys()
-        pass
-
-
-class CustomTimer(QWidget, Observed, metaclass=CustomTimerMeta):  #
-
-    def notify(self, ids: dict, state='create') -> None:
-        """ Notify all observers about an event."""
-        if state == 'create':
-            self._flag_observers[ids['sub_id']].create(ids)
-        elif state == 'update':
-            self._flag_observers[ids['sub_id']].update()
-        else:
-            pass
-        pass
-
-    def __init__(self, time_line: db_models.ProjectTimeLine, timer: QTimer = None, label: QLabel = None,
-                 icon: QLabel = None, extra: QLabel = None):
+class CustomTimer(QWidget, ObservedTimer, metaclass=CustomTimerMeta):
+    def __init__(self, time_line, timer: QTimer = None, label: QLabel = None, icon: QLabel = None, ):
         super(CustomTimer, self).__init__()
         self.__flag = False
         self.__today = datetime.today()
@@ -163,11 +57,6 @@ class CustomTimer(QWidget, Observed, metaclass=CustomTimerMeta):  #
             self.__label = QLabel()
         else:
             self.__label = label
-
-        # if extra is None:
-        #     self.__extra = QLabel()
-        # else:
-        #     self.__extra = extra
 
         self.__time_line = time_line
 
@@ -235,7 +124,6 @@ class CustomTimer(QWidget, Observed, metaclass=CustomTimerMeta):  #
 
     # method called by timer
     def show_time(self, mode=None):
-        # check if display or change mode # default is None --> change mode
         if not mode:
             # checking if flag is true
             if self.flag:
@@ -246,9 +134,6 @@ class CustomTimer(QWidget, Observed, metaclass=CustomTimerMeta):  #
                 self.__reset()
         # showing text
         self.__label.setText(str(self.time))
-
-        # if self.__extra:
-        #     self.__extra.setText(str(self.time))
 
     def change(self):
         # making flag to true
@@ -407,18 +292,4 @@ class TimeTracker(QWidget):
 
 
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    # form = CustomTimer(
-    #     db_models.ProjectTimeLine(
-    #         project_id=10,
-    #         sub_id=1,
-    #         user=182,
-    #     )
-    #
-    # )
-    form = SimpleTimer()
-
-    form.show()
-    # e = Event()
-    sys.exit(app.exec())
     pass

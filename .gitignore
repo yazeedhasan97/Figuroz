@@ -10,3 +10,9 @@ test*.py
 tests/
 *test*
 *test.ini
+*.cs
+*.zip
+outer_assets/
+*.png
+*.jpg
+*.jpeg
