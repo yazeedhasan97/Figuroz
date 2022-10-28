@@ -1686,36 +1686,36 @@ def take_screenshot(save_dir, blur=False):
     )
 
 
-def initiate_database_models(conn):
-    df = utils.create_df_from_object(Project(
-        project_id=0, name='', status=1, entry_id='', m_user=0, company_id=0,
-    ))
-    conn.write(df, table='Project', schema=None)
-
-    df = utils.create_df_from_object(Task(
-        project_id=0, sub_id=0, company_id=0, status=0, is_select=False, entry_id='', m_user=0, name='',
-    ))
-    conn.write(df, table='Task', schema=None)
-
-    df = utils.create_df_from_object(ProjectTimeLine(
-        project_id=0, sub_id=0, user=0,
-
-    ))
-    conn.write(df, table='ProjectTimeLine', schema=None)
-
-    df = utils.create_df_from_object(User(
-        user_id=0, sync_id=0, token='', company_id=0, email_address='', password='',
-        status=0, logout=0, access_level=0, start_work_at=datetime.now(), name='',
-    ))
-    conn.write(df, table='User', schema=None)
-
-    df = utils.create_df_from_object(Screenshot(
-        date='', width=0, height=0, log_id=0, entry_id='', mouse_move=0,
-        key_click=0, project_id=0, screenshot='', popup_height=0, sync=0, user=0, popup_width=0
-    ))
-    conn.write(df, table='Screenshot', schema=None)
-
-    pass
+# def initiate_database_models(conn):
+#     df = utils.create_df_from_object(Project(
+#         project_id=0, name='', status=1, entry_id='', m_user=0, company_id=0,
+#     ))
+#     conn.write(df, table='Project', schema=None)
+#
+#     df = utils.create_df_from_object(Task(
+#         project_id=0, sub_id=0, company_id=0, status=0, is_select=False, entry_id='', m_user=0, name='',
+#     ))
+#     conn.write(df, table='Task', schema=None)
+#
+#     df = utils.create_df_from_object(ProjectTimeLine(
+#         project_id=0, sub_id=0, user=0,
+#
+#     ))
+#     conn.write(df, table='ProjectTimeLine', schema=None)
+#
+#     df = utils.create_df_from_object(User(
+#         user_id=0, sync_id=0, token='', company_id=0, email_address='', password='',
+#         status=0, logout=0, access_level=0, start_work_at=datetime.now(), name='',
+#     ))
+#     conn.write(df, table='User', schema=None)
+#
+#     df = utils.create_df_from_object(Screenshot(
+#         date='', width=0, height=0, log_id=0, entry_id='', mouse_move=0,
+#         key_click=0, project_id=0, screenshot='', popup_height=0, sync=0, user=0, popup_width=0
+#     ))
+#     conn.write(df, table='Screenshot', schema=None)
+#
+#     pass
 
 
 if __name__ == "__main__":

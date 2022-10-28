@@ -8,7 +8,7 @@ from PyQt6 import QtGui
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget, QListWidget, QGridLayout, \
     QLabel, QMenu, QMainWindow, QLayout, QListWidgetItem, \
-    QAbstractItemView, QMessageBox, QLineEdit, QPushButton, QCheckBox, QVBoxLayout
+    QAbstractItemView, QMessageBox, QLineEdit, QPushButton, QCheckBox, QVBoxLayout, QStatusBar
 from PyQt6.QtGui import QIcon, QAction
 
 from scripts import db, utils, consts, SQLs
@@ -199,6 +199,11 @@ class LoginForm(QWidget):
 
         user = self.__load_user_data(email, password)
 
+        if user is None or not user:
+            msg.setText("Could not find user in the system.")
+            msg.exec()
+            return
+
         if self.remember_me.isChecked():
             utils.remember_me(user, consts.REMEMBER_ME_FILE_PATH)
 
@@ -228,7 +233,7 @@ class LoginForm(QWidget):
             ), conn_s=MainController.DB_CONNECTION)
 
             if user_df.empty:
-                msg.setText("Could not load pre-saved user.")
+                msg.setText("Password might be incorrect.")
                 msg.exec()
                 return
 
@@ -318,6 +323,8 @@ class MainAppA(QMainWindow):
         self.__create_menu_bar()
 
         self.__init_layouts()
+
+        self.setStatusBar(QStatusBar(self))
 
         self.__fill_projects_qlist()
         self.__fill_tasks_qlist_dict()
