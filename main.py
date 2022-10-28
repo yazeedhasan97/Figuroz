@@ -12,10 +12,11 @@ from scripts.controllers import MainController
 # TODO: Remove the double click behavior over the tasks
 # TODO: More modifications over the UI/UX
 
+# TODO: Check why multiple users continue to each other
 
 def main(args):
     try:
-        conn = db.create_db_connection(path=consts.DB_CONFIG_FILE)
+        conn = db.create_db_connection()
         MainController.initiate_database_connection(conn)
 
     except Exception as e:

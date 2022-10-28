@@ -252,13 +252,10 @@ class Sync:
         df = db.execute(SQLs.SELECT_ALL_TIMELINES_WHERE_USER_AND_SYNC_IS_ZERO.format(
             user=user.id
         ), conn_s=MainController.DB_CONNECTION).convert_dtypes(infer_objects=True, )
-        # print(df.info())
         df['project_id'] = df['project_id'] .astype(np.int64)
         df['sub_id'] = df['sub_id'] .astype(np.int64)
         df['user'] = df['user'] .astype(np.int64)
         df['sync'] = df['sync'] .astype(np.int64)
-        # MainController.DB_CONNECTION.write(df.convert_dtypes(), 'ProjectTimeLine', if_exists='replace')
-        # print(df.info())
         data = df.drop(
             ['project_id', 'current_project_line_id', 'sync', 'day_format', 'time_start', 'time_end'],
             axis=1
@@ -310,8 +307,8 @@ if __name__ == "__main__":
     user = Sync.send_login_request('emran.allan@gmail.com', 'Emran@111')
     print(user)
 
-    res = Sync.update_project_timelines_request(user)
-    print('Results:', res)
+    # res = Sync.update_project_timelines_request(user)
+    # print('Results:', res)
     # print(res.info())
     # print(res[['startDate', 'duration', 'endDate']])
 

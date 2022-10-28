@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 from datetime import timedelta, datetime
 
 import pandas as pd
@@ -27,8 +28,8 @@ class ForgetPasswordForm(QWidget):
 
     def __init__(self, parent=None):
         super(ForgetPasswordForm, self).__init__()
-        self.login_form = None
-        self.parent = parent
+        # self.login_form = None
+        # self.parent = parent
         self.__init_ui()
 
         layout = QGridLayout()
@@ -61,7 +62,7 @@ class ForgetPasswordForm(QWidget):
 
     def __init_ui(self):
         self.setWindowTitle(consts.APP_NAME + ' -- Forget Password Form')
-        height = consts.FORGET_PASSWORD_HEIGHT
+        height = consts.FORGET_PASSWORD_SCREEN_HEIGHT
         width = consts.FORGET_PASSWORD_WIDTH
         self.resize(width, height)
         self.setMinimumHeight(height)
@@ -74,7 +75,7 @@ class ForgetPasswordForm(QWidget):
 
     def check_password(self):
         msg = QMessageBox()
-        email = self.lineEdit_username.text()
+        email = self.lineEdit_username.text().lower()
         if email is None or email == '':
             msg.setText('Please enter an email to validate.')
             msg.exec()
@@ -96,20 +97,18 @@ class ForgetPasswordForm(QWidget):
         return
 
     def return_to_login_page(self):
-        self.parent.show()
+        # self.parent.show()
+        LoginForm(state='reverse').show()
         self.hide()
         self.destroy()
-        del self
+        self.close()
         pass
 
 
 class LoginForm(QWidget):
-    def __init__(self, ):
+    def __init__(self, state=None):
         super(LoginForm, self).__init__()
         self.__init_ui()
-
-        self.forget_password_form = None
-        self.main_screen = None
 
         layout = QGridLayout()
 
@@ -154,7 +153,8 @@ class LoginForm(QWidget):
         layout.setContentsMargins(15, 25, 15, 25)
         self.setLayout(layout)
 
-        self.__try_remember_me_login()
+        if state is None:
+            self.__try_remember_me_login()
 
     def show_password(self, ):
         if self.lineEdit_password.echoMode() == QLineEdit.EchoMode.Normal:
@@ -166,8 +166,8 @@ class LoginForm(QWidget):
 
     def __init_ui(self):
         self.setWindowTitle(consts.APP_NAME + ' -- Login Form')
-        height = consts.LOGIN_PASSWORD_HEIGHT
-        width = consts.LOGIN_PASSWORD_WIDTH
+        height = consts.LOGIN_SCREEN_HEIGHT
+        width = consts.LOGIN_SCREEN_WIDTH
         self.resize(width, height)
         self.setMinimumHeight(height)
         self.setMaximumHeight(height)
@@ -179,7 +179,7 @@ class LoginForm(QWidget):
 
     def check_password(self):
         msg = QMessageBox()
-        email = self.lineEdit_username.text()
+        email = self.lineEdit_username.text().lower()
         password = self.lineEdit_password.text()
         if email is None or not email:
             msg.setText('Please enter an email.')
@@ -211,16 +211,11 @@ class LoginForm(QWidget):
         self.next_screen(user)
 
     def forget_password(self, event):
-        if self.forget_password_form is None:
-            self.forget_password_form = ForgetPasswordForm(self)
-            self.forget_password_form.show()
-            self.hide()
-        else:
-            self.forget_password_form.close()  # Close window.
-            self.forget_password_form = None
-            self.show()
-
-        pass
+        self.screen = ForgetPasswordForm()
+        self.screen.show()
+        self.hide()
+        self.destroy()
+        self.close()
 
     def __load_user_data(self, email, password):
         msg = QMessageBox()
@@ -279,23 +274,19 @@ class LoginForm(QWidget):
         return True
 
     def next_screen(self, user):
-        if self.main_screen is None:
-            self.main_screen = MainAppA(
-                title=consts.APP_NAME,
-                left=100,
-                top=100,
-                height=400,
-                parent=self,
-                user=user,
-            )
-            self.main_screen.show()
-        else:
-            self.main_screen.show()  # Close window.
-            self.main_screen = None
+        self.screen = MainAppA(
+            title=consts.APP_NAME,
+            left=consts.MAIN_SCREEN_LEFT_CORNER_START,
+            top=consts.MAIN_SCREEN_TOP_CORNER_START,
+            height=consts.MAIN_SCREEN_HEIGHT,
+            parent=self,
+            user=user,
+        )
+        self.screen.show()
 
         self.hide()
-        self.close()
         self.destroy()
+        self.close()
 
         pass
 
@@ -329,10 +320,16 @@ class MainAppA(QMainWindow):
         self.__fill_projects_qlist()
         self.__fill_tasks_qlist_dict()
 
-        self.__fill_with_last_active_project()
+        if os.path.exists(consts.REMEMBER_LAST_ACTIVE_FILE_PATH):
+            self.__fill_with_last_active_project()
 
         if self.user.sync_data:  # TODO: ned the interval of updates
-            Periodic(consts.DURATIONS_UPLOAD_INTERVAL, lambda: Sync.update_project_timelines_request(user=self.user))
+            self.periodic_duration_sync = Periodic(
+                consts.DURATIONS_UPLOAD_INTERVAL,
+                lambda: Sync.update_project_timelines_request(user=self.user)
+            )
+        else:
+            self.periodic_duration_sync = None
 
         # if settings.take_screenshots:
         #     # TODO: time intervals should be from the DB
@@ -354,19 +351,37 @@ class MainAppA(QMainWindow):
         file_menu.addAction(self.logout_action)
 
         self.exit_action = QAction("&Exit", self)
-        self.exit_action.triggered.connect(self.close)
+        self.exit_action.triggered.connect(self.closeEvent)
         file_menu.addAction(self.exit_action)
 
+    def __flush(self):
+        for sub_id in self.tasks_timers_dict:
+            if self.tasks_timers_dict[sub_id].flag:
+                self.tasks_timers_dict[sub_id].pause()
+
+        if self.active_project is not None:
+            utils.remember_me(
+                self.active_project,
+                consts.REMEMBER_LAST_ACTIVE_FILE_PATH
+            )
+        if self.periodic_duration_sync is not None:
+            self.periodic_duration_sync.stop()
+            # del self.periodic_duration_sync
+
     def __logout(self):
+        self.__flush()
+
         if os.path.exists(consts.REMEMBER_ME_FILE_PATH):
             os.remove(consts.REMEMBER_ME_FILE_PATH)
 
         if os.path.exists(consts.REMEMBER_LAST_ACTIVE_FILE_PATH):
             os.remove(consts.REMEMBER_LAST_ACTIVE_FILE_PATH)
 
-        self.parent.show()
+        # self.parent.show()
+        LoginForm(state='reverse').show()
         self.hide()
         self.destroy()
+        self.close()
 
     def __init_ui(self, title, left, top, height):
         self.setWindowTitle(title)
@@ -397,6 +412,10 @@ class MainAppA(QMainWindow):
         self.lbl_active_task = QLabel('Task')
         self.lbl_active_task.setStyleSheet(consts.GENERAL_QLabel_STYLESHEET)
         title_layout.addWidget(self.lbl_active_task, 1, 0)
+
+        self.lbl_current_user = QLabel(self.user.username)
+        self.lbl_current_user.setStyleSheet(consts.GENERAL_QLabel_STYLESHEET)
+        title_layout.addWidget(self.lbl_current_user, 2, 0)
 
         self.lbl_worked_today = QLabel('Worked Today: ')
         title_layout.addWidget(self.lbl_worked_today, 2, 2)
@@ -639,16 +658,7 @@ class MainAppA(QMainWindow):
         pass
 
     def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
-        for sub_id in self.tasks_timers_dict:
-            if self.tasks_timers_dict[sub_id].flag:
-                self.tasks_timers_dict[sub_id].pause()
-
-        if self.active_project is not None:
-            utils.remember_me(
-                self.active_project,
-                consts.REMEMBER_LAST_ACTIVE_FILE_PATH
-            )
-
+        self.__flush()
         super().closeEvent(a0)
 
     def __fill_with_last_active_project(self):

@@ -3,7 +3,7 @@ SELECT_ALL_USERS_WHERE_EMAIL_AND_PASSWORD = """
 """
 
 SELECT_ALL_PROJECTS_WHERE_COMPANY = """
-    select * from Project where companyId = '{company_id}' 
+    select * from Project where companyId = {company_id}
 """
 
 SELECT_ALL_TASKS_IN_PROJECTS = """
@@ -11,11 +11,11 @@ SELECT_ALL_TASKS_IN_PROJECTS = """
 """
 
 SELECT_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE = """
-    select duration from ProjectTimeLine where user like '{user}' and project_id like '{project_id}' and day_format like '{today}' 
+    select duration from ProjectTimeLine where user = {user} and project_id like {project_id} and day_format like '{today}' 
 """
 
 SELECT_TASKID_AND_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE = """
-    select sub_id, duration from ProjectTimeLine where user like '{user}' and project_id like '{project_id}' and day_format like '{today}' 
+    select sub_id, duration from ProjectTimeLine where user = {user} and project_id like {project_id} and day_format like '{today}' 
 """
 
 INSERT_NEW_ROW_PROJECT_TME_LINE = """

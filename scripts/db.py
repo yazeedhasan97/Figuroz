@@ -1,9 +1,13 @@
+import os
+
 import pandas as pd
 from sshtunnel import SSHTunnelForwarder
 import configparser
 import sqlalchemy as sa
 
 from sqlalchemy_utils import database_exists, create_database
+
+from scripts import consts
 
 
 class Singleton(type):
@@ -138,40 +142,22 @@ class StaticDBConnection(metaclass=Singleton):
         pass
 
 
-def create_db_connection(path=None, ):
-    config = configparser.ConfigParser()
-
-    try:
-        config.read(path)
-        print(path)
-    except IOError:
-        raise IOError(
-            "Can't read and/or find the config file. "
-            "please make sure you are using the correct name and the config file exists."
-        )
-
-    print('Config available sections:', config.sections())
-    dct = {}
-    for section in config.sections():
-        print(f'{section} available configs are {config.options(section)}')
-        for option in config.options(section):
-            opt = option.upper()
-            try:
-                if opt.startswith('USE'):
-                    dct[opt] = config.getboolean(section, option)
-                elif opt.endswith('NUM'):
-                    dct[opt] = config.getint(section, option)
-                else:
-                    dct[opt] = config.get(section, option)
-            except ValueError:
-                try:
-                    dct[opt] = config.get(section, option)
-                except OSError:
-                    raise IOError(
-                        "Error while reading the config file. "
-                        "one of the parameters and/or sections is missing or null."
-                    )
-            pass
+def create_db_connection():
+    db_name = '/' + consts.DB_PATH
+    dct = {
+        'USE_SSH': False,
+        'SSH_USER': None,
+        'SSH_HOST': None,
+        'SSH_PRIVATE_KEY': None,
+        'DELICATE': 'sqlite',
+        'DB_HOST': None,
+        'DB_PORT_NUM': None,
+        'DB_NAME': db_name,
+        'DB_SQL_USER': None,
+        'DB_SQL_PASSWORD': None,
+        'USE_STREAM': False,
+        'USE_URI': False,
+    }
     print('Loaded configs are:', dct)
     return StaticDBConnection(
         # SSH SECTION
@@ -192,9 +178,9 @@ def create_db_connection(path=None, ):
     )
 
 
-def execute(sql: str, conn_s: StaticDBConnection = None, path: str = None):
+def execute(sql: str, conn_s: StaticDBConnection = None, ):
     if conn_s is None:
-        conn = create_db_connection(path=path)
+        conn = create_db_connection()
     else:
         conn = conn_s
 
@@ -209,3 +195,10 @@ def execute(sql: str, conn_s: StaticDBConnection = None, path: str = None):
         conn.close()
 
     return data
+
+
+if __name__ == "__main__":
+    conn = create_db_connection()
+    df = conn.select('select * from User')
+    print(df.info())
+    conn.close()
