@@ -6,10 +6,11 @@ from PyQt6.QtWidgets import QApplication
 from scripts import views, db, consts
 from scripts.controllers import MainController
 
-# TODO: check what changes the datatypes in teh databases
-# TODO: validate the double insert behaviour of the first task in the first loaded project
-# TODO:  remove the double click behavior over the tasks
-# TODO: more modifications over the UI/UX
+
+# TODO: Check what changes the datatypes in teh databases
+# TODO: Validate the double insert behaviour of the first task in the first loaded project
+# TODO: Remove the double click behavior over the tasks
+# TODO: More modifications over the UI/UX
 
 
 def main(args):

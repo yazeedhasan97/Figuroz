@@ -253,10 +253,10 @@ class Sync:
             user=user.id
         ), conn_s=MainController.DB_CONNECTION).convert_dtypes(infer_objects=True, )
         # print(df.info())
-        # df['project_id'] = df['project_id'] .astype(np.int64)
-        # df['sub_id'] = df['sub_id'] .astype(np.int64)
-        # df['user'] = df['user'] .astype(np.int64)
-        # df['sync'] = df['sync'] .astype(np.int64)
+        df['project_id'] = df['project_id'] .astype(np.int64)
+        df['sub_id'] = df['sub_id'] .astype(np.int64)
+        df['user'] = df['user'] .astype(np.int64)
+        df['sync'] = df['sync'] .astype(np.int64)
         # MainController.DB_CONNECTION.write(df.convert_dtypes(), 'ProjectTimeLine', if_exists='replace')
         # print(df.info())
         data = df.drop(
