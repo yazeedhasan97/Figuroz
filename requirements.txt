@@ -3,8 +3,18 @@ sshtunnel
 sqlalchemy
 sqlalchemy-utils
 pandas
+numpy
 iso8601
 Pillow
 requests
 geocoder
 watchdog
+pynput
+pytest
+pyyaml
+python3-xlib
+python-xlib
+wmi # WMI
+tomlkit
+appdirs
+# splinter

@@ -1,68 +1,114 @@
 from __future__ import annotations
-import time
+import os.path
+import platform
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from scripts import models
+import pandas as pd
 
-from threading import Timer, Lock
+from database import models, db
+from common import consts, utils
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from scripts.models import ProjectTimeLine
+from database.models import ProjectTimeLine
+
+from pynput.mouse import Listener as MouseListener
+from pynput.keyboard import Listener as KeyboardListener
+
+import sys
+import time
 
 
 class MainController:
-    Settings = None
+    API_CONNECTION = None
+    CURRENT_ACTIVE_USER_ID = None
     DB_CONNECTION = None
 
-    @classmethod
-    def initiate_settings(cls, settings):
-        MainController.Settings = settings
+    SETTINGS = None
+    CURRENT_COMPUTER_SCREEN = None
+    KEYBOARD_KEYS_COUNT = 0
+    MOUSE_KEYS_COUNT = 0
+    MOUSE_MOVE_COUNT = 0
+    SYSTEM = None
+    CURRENT_ACTIVE_PROJECT_ID = None
+    CURRENT_ACTIVE_TASK_ID = None
+    CURRENT_ACTIVE_APPLICATION_ID = None
+    CURRENT_ACTIVE_URL_ID = None
 
     @classmethod
-    def initiate_database_connection(cls, conn):
-        MainController.DB_CONNECTION = conn
+    def store_api_connection(cls, connection):
+        if MainController.API_CONNECTION is None:
+            MainController.API_CONNECTION = connection
+
+    @classmethod
+    def store_database_connection(cls, connection):
+        if MainController.DB_CONNECTION is None:
+            MainController.DB_CONNECTION = connection
+
+    @classmethod
+    def store_current_active_project_id(cls, id):
+        MainController.CURRENT_ACTIVE_PROJECT_ID = id
+
+    @classmethod
+    def store_current_active_task_id(cls, id):
+        MainController.CURRENT_ACTIVE_TASK_ID = id
+
+    @classmethod
+    def store_current_active_application_id(cls, id):
+        MainController.CURRENT_ACTIVE_APPLICATION_ID = id
+
+    @classmethod
+    def store_current_active_url_id(cls, id):
+        MainController.CURRENT_ACTIVE_URL_ID = id
+
+    @classmethod
+    def store_system_type(cls, ):
+        MainController.SYSTEM = platform.system()
+
+    @classmethod
+    def store_settings(cls, settings):
+        MainController.SETTINGS = settings
+
+    @classmethod
+    def initiate_database_connection(cls, path):
+        if MainController.DB_CONNECTION is None:
+            MainController.DB_CONNECTION = db.create_db_connection(path)
 
     @classmethod
     def close_database_connection(cls, ):
-        MainController.DB_CONNECTION.close()
+        if MainController.DB_CONNECTION is not None:
+            MainController.DB_CONNECTION.close()
 
+    @classmethod
+    def store_screen_details(cls, screen):
+        MainController.CURRENT_COMPUTER_SCREEN = screen
 
-class Periodic:
-    """
-    A periodic task running in threading.Timers
-    """
+    @classmethod
+    def increase_keyboard_keys_count(cls, ):
+        MainController.KEYBOARD_KEYS_COUNT += 1
 
-    def __init__(self, interval, function, *args, **kwargs):
-        self._lock = Lock()
-        self._timer = None
-        self.function = function
-        self.interval = interval
-        self.args = args
-        self.kwargs = kwargs
-        self._stopped = True
-        if kwargs.pop('autostart', True):
-            self.start()
+    @classmethod
+    def reset_keyboard_keys_count(cls, ):
+        MainController.KEYBOARD_KEYS_COUNT = 0
 
-    def start(self, from_run=False):
-        self._lock.acquire()
-        if from_run or self._stopped:
-            self._stopped = False
-            self._timer = Timer(self.interval, self._run)
-            self._timer.start()
-        self._lock.release()
+    @classmethod
+    def increase_mouse_keys_count(cls, ):
+        MainController.MOUSE_KEYS_COUNT += 1
 
-    def _run(self):
-        self.start(from_run=True)
-        self.function(*self.args, **self.kwargs)
+    @classmethod
+    def reset_mouse_keys_count(cls, ):
+        MainController.MOUSE_KEYS_COUNT = 0
 
-    def stop(self):
-        self._lock.acquire()
-        self._stopped = True
-        self._timer.cancel()
-        self._lock.release()
+    @classmethod
+    def increase_mouse_moves_count(cls, ):
+        MainController.MOUSE_MOVE_COUNT += 1
+
+    @classmethod
+    def reset_mouse_moves_count(cls, ):
+        MainController.MOUSE_MOVE_COUNT = 0
 
 
 class AbstractObserver(ABC):
@@ -119,7 +165,7 @@ class TimerObserver(AbstractObserver):
         self._tracker.duration = datetime.now() - self._start
         print('Updated the Self Duration')
         try:
-            self._tracker.insert_to_db(MainController.DB_CONNECTION)
+            self._tracker.register(MainController.DB_CONNECTION)
         except Exception as e:
             print(e)
             raise e
@@ -149,12 +195,52 @@ class ObservedTimer(AbstractObserved):
         pass
 
 
-# TODO: Activate ScreenShot Observer
-# TODO: Activate ScreenShot Periodic
+class ScreenShotDirectoryHandler(FileSystemEventHandler):
+    @staticmethod
+    def on_created(event, **kwargs):
+        path = event.src_path
+        time.sleep(1)
+        if event.is_directory:
+            return None
+        else:
+            if path.endswith('.png') or path.endswith('.jpg') or path.endswith('.jpeg'):
+                file = os.path.basename(path)
+                screenshot = models.Screenshot(
+                    id=file.split('_')[0] + datetime.now().strftime(consts.ID_TIME_FORMATS),
+                    user=int(file.split('_')[0]),
+                    date=datetime.strptime(file.split('_')[1], consts.IMAGE_DATE_TIME_FORMATS),
+                    screenshot=utils.convert_image_to_binary(utils.read_image(path)),
+                    mouse_move=MainController.MOUSE_MOVE_COUNT,
+                    key_click=MainController.KEYBOARD_KEYS_COUNT,
+                    mouse_clicks=MainController.MOUSE_KEYS_COUNT,
+                    sync=0,
+                )
+                data = utils.create_df_from_object(screenshot)
+
+                try:
+                    data = pd.DataFrame(data, index=[0])
+                    data['date'] = data['date'].astype(str)
+                    MainController.DB_CONNECTION.write(data, 'Screenshot', if_exists='append')
+
+                    MainController.reset_keyboard_keys_count()
+                    MainController.reset_mouse_moves_count()
+                    MainController.reset_mouse_keys_count()
+                    # if os.path.exists(path):
+                    #     os.remove(path)
+                except Exception as e:
+                    print(e)
+            else:
+                pass
+
+
 class ScreenShotDirectoryWatcher:
-    def __init__(self, directory):
+    def __init__(self, directory: str, auto_start=False):
         self.observer = Observer()
+        print("Observing :", directory)
         self.__directory = directory
+
+        if auto_start:
+            self.run()
 
     def __get_directory(self):
         return self.__directory
@@ -171,118 +257,91 @@ class ScreenShotDirectoryWatcher:
         fdel=__del_directory,
     )
 
-    def run(self, recursive=True):
+    def run(self, recursive=False):
         event_handler = ScreenShotDirectoryHandler()
-        self.observer.schedule(event_handler, self.__directory, recursive=recursive)
+        self.observer.schedule(event_handler, self.__directory, recursive=recursive, )
         self.observer.start()
-        try:
-            while True:  # TODO: this is not needed in stoppable apps behaviour
-                time.sleep(3)
-        except Exception as e:
-            self.observer.stop()
-            print(e)
-            # raise e
-
-        self.observer.join()
+        # self.observer.join()  # TODO: More consideration
         return self
 
-
-class ScreenShotDirectoryHandler(FileSystemEventHandler):
-    @staticmethod
-    def on_any_event(event, **kwargs):
-        if event.is_directory:
-            return None
-
-        elif event.event_type == 'created':
-            # Take any action here when a file is first created.
-            path = event.src_path
-            print(f"Received created event - {path}.")
-            time.sleep(1)
-            try:
-                pass
-            except Exception as e:
-                print(e)
-                raise e
-
-        elif event.event_type == 'modified':
-            # Taken any action here when a file is modified.
-            path = event.src_path
-            print(f"Received modified event - {path}.")
-            time.sleep(1)
-            try:
-                pass
-            except Exception as e:
-                print(e)
-                raise e
+    def stop(self):
+        self.observer.stop()
+        self.observer.join()
 
 
-# TODO: Activate Apps Observer
-# TODO: Activate Apps Periodic
-class ApplicationObserver(AbstractObserver):
-    _tracker = None
-    _start = None
+class InputsObserver:
+    __moves_divider = 0
 
-    def update(self, ) -> None:
+    def __init__(self, auto_start=False):
+        if sys.platform in ['Mac', 'darwin', 'os2', 'os2emx']:
+            import HIServices
+            if not HIServices.AXIsProcessTrusted():
+                print('Recording user inputs are not trusted, please modify your computer settings')
+
+        self.mouse_listener = MouseListener(
+            on_move=self.on_mouse_move,
+            on_click=self.on_mouse_click,
+            on_scroll=self.on_mouse_scroll,
+        )
+        self.keyboard_listener = KeyboardListener(
+            on_press=self.on_keyboard_press,
+            on_release=self.on_keyboard_release,
+        )
+        if auto_start:
+            self.start()
+
+    def stop(self):
+        self.mouse_listener.join()
+        self.keyboard_listener.join()
+        self.mouse_listener.stop()
+        self.keyboard_listener.stop()
+
+    def start(self):
+        self.mouse_listener.start()
+        self.keyboard_listener.start()
+
+    def on_mouse_move(self, x, y):
+        self.__moves_divider += 1
+        if self.__moves_divider % consts.MOUSE_MOVE_DIVIDER == 0:
+            MainController.increase_mouse_moves_count()
+            self.__moves_divider = 0
+
+    def on_mouse_click(self, x, y, button, pressed):
+        if pressed:
+            MainController.increase_mouse_keys_count()
+            print('on_mouse_click')
+
+    def on_mouse_scroll(self, x, y, dx, dy):
+        MainController.increase_mouse_moves_count()
+        # print('Scrolled {0} at {1}'.format(
+        #     'down' if dy < 0 else 'up',
+        #     (x, y)))
+
+    def on_keyboard_press(self, key):
+        pass
+
+    def on_keyboard_release(self, key):
+        MainController.increase_keyboard_keys_count()
         pass
 
 
-class ObservedApplication(AbstractObserved):
-    """ The Subject interface declares a set of methods for managing subscribers. """
-    _state = None
-    _observers = {}
+class StoppableThread(threading.Thread):
+    """Thread class with a stop() method. The thread itself has to check
+    regularly for the stopped() condition."""
 
-    def attach(self, id) -> None:
-        """ Attach an observer to the subject. """
-        pass
+    def __init__(self, *args, **kwargs):
+        super(StoppableThread, self).__init__(*args, **kwargs)
+        self._stop_event = threading.Event()
 
-    def notify(self, ids: dict, state='create') -> None:
-        """ Notify all observers about an event."""
-        pass
+    def stop(self):
+        self._stop_event.set()
+        self.join()
 
-
-# TODO: Activate URLs Observer
-# TODO: Activate URLs Periodic
-class URLObserver(AbstractObserver):
-    _tracker = None
-    _start = None
-
-    def update(self, ) -> None:
-        pass
+    def stopped(self):
+        return self._stop_event.is_set()
 
 
-class ObservedURL(AbstractObserved):
-    """ The Subject interface declares a set of methods for managing subscribers. """
-    _state = None
-    _observers = {}
-
-    def attach(self, id) -> None:
-        """ Attach an observer to the subject. """
-        pass
-
-    def notify(self, ids: dict, state='create') -> None:
-        """ Notify all observers about an event."""
-        pass
-
-
-# TODO: Activate Ideal Time Observer
-# TODO: Activate Ideal Time Periodic
-class IdealTimeObserver(AbstractObserver):
-    _tracker = None
-    _start = None
-
-    def update(self, ) -> None:
-        pass
-
-
-class ObservedIdealTime(AbstractObserved):
-    """ The Subject interface declares a set of methods for managing subscribers. """
-    _state = None
-    _observers = {}
-
-    def attach(self, id) -> None:
-        """ Attach an observer to the subject. """
-        pass
-
-    def notify(self, ids: dict, state='create') -> None:
-        """ Notify all observers about an event."""
-        pass
+if __name__ == "__main__":
+    x = InputsObserver(auto_start=True)
+    while True:
+        time.sleep(1)

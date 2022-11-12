@@ -7,7 +7,7 @@ from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QWidget, QHBoxLayout, QStyledItemDelegate, QStyleOptionViewItem
 
-from scripts import consts, utils
+from common import consts, utils
 from scripts.controllers import ObservedTimer
 
 logger = logging.getLogger(__name__)
@@ -176,9 +176,9 @@ class CustomTimer(QWidget, ObservedTimer, metaclass=CustomTimerMeta):
 
 
 class TimeTracker(QWidget):
-    def __init__(self, parent=None, timer: QTimer = None, label: QLabel = None, icon: QLabel = None, ):
+    def __init__(self, parent=None, timer: QTimer = None, label: QLabel = None, icon: QLabel = None, icon_flag=True):
         super(TimeTracker, self).__init__(parent=parent)
-
+        self.__icon_flag = icon_flag
         self.__flag = False
         self.__today = datetime.today()
 
@@ -207,8 +207,9 @@ class TimeTracker(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addStretch()
         layout.addWidget(self.__label)
-        layout.addSpacing(2)
-        layout.addWidget(self.__icon)
+        if self.__icon_flag:
+            layout.addSpacing(2)
+            layout.addWidget(self.__icon)
 
         # update the timer every single second
         self.__timer.start(1000)
@@ -273,13 +274,15 @@ class TimeTracker(QWidget):
 
     def start(self):
         # making flag to true
-        self.__icon.setPixmap(QPixmap(consts.PAUSE_ICON_PATH))
+        if self.__icon_flag:
+            self.__icon.setPixmap(QPixmap(consts.PAUSE_ICON_PATH))
         self.flag = True
         return self
 
     def pause(self):  # Notify the Observer Only On stop to update the DB
         # making flag to False
-        self.__icon.setPixmap(QPixmap(consts.START_ICON_PATH))
+        if self.__icon_flag:
+            self.__icon.setPixmap(QPixmap(consts.START_ICON_PATH))
         self.flag = False
 
         return self

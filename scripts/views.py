@@ -1,35 +1,31 @@
 import json
 import os
 import re
-import sys
 from datetime import timedelta, datetime
-
+from multiprocessing import Process, Pipe
 import pandas as pd
 from PyQt6 import QtGui
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtWidgets import QWidget, QListWidget, QGridLayout, \
     QLabel, QMenu, QMainWindow, QLayout, QListWidgetItem, \
-    QAbstractItemView, QMessageBox, QLineEdit, QPushButton, QCheckBox, QVBoxLayout, QStatusBar
+    QAbstractItemView, QMessageBox, QLineEdit, QPushButton, QCheckBox, QVBoxLayout, QStatusBar, QFrame, QHBoxLayout
 from PyQt6.QtGui import QIcon, QAction
 
-from scripts import db, utils, consts, SQLs
-from scripts.models import User, Task, Project, ProjectTimeLine
-from scripts.controllers import MainController, Periodic
-from scripts.sync import Sync
-
+from database import db, SQLs
+from common import consts, utils
+from database.models import User, Task, Project, ProjectTimeLine
+from scripts.controllers import MainController, ScreenShotDirectoryWatcher, InputsObserver, StoppableThread
+from apis.sync import Sync
 from scripts.custom_views import QClickableLabel, TimeTracker, CustomTimer
+from scripts.trackers import Periodic
 
 
 class ForgetPasswordForm(QWidget):
-    """
-    This "window" is a QWidget. If it has no parent, it
-    will appear as a free-floating window as we want.
+    """ This "window" is a QWidget. If it has no parent, it will appear as a free-floating window as we want.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, ):
         super(ForgetPasswordForm, self).__init__()
-        # self.login_form = None
-        # self.parent = parent
         self.__init_ui()
 
         layout = QGridLayout()
@@ -97,7 +93,6 @@ class ForgetPasswordForm(QWidget):
         return
 
     def return_to_login_page(self):
-        # self.parent.show()
         LoginForm(state='reverse').show()
         self.hide()
         self.destroy()
@@ -109,7 +104,7 @@ class LoginForm(QWidget):
     def __init__(self, state=None):
         super(LoginForm, self).__init__()
         self.__init_ui()
-
+        self.screen = None
         layout = QGridLayout()
 
         label_name = QLabel('Email')
@@ -178,6 +173,7 @@ class LoginForm(QWidget):
         pass
 
     def check_password(self):
+        # TODO: Need APIs methodology to validate Password
         msg = QMessageBox()
         email = self.lineEdit_username.text().lower()
         password = self.lineEdit_password.text()
@@ -225,7 +221,7 @@ class LoginForm(QWidget):
         if not user:
             user_df = db.execute(SQLs.SELECT_ALL_USERS_WHERE_EMAIL_AND_PASSWORD.format(
                 email=email, password=password
-            ), conn_s=MainController.DB_CONNECTION)
+            ), conn=MainController.DB_CONNECTION)
 
             if user_df.empty:
                 msg.setText("Password might be incorrect.")
@@ -274,12 +270,7 @@ class LoginForm(QWidget):
         return True
 
     def next_screen(self, user):
-        self.screen = MainAppA(
-            title=consts.APP_NAME,
-            left=consts.MAIN_SCREEN_LEFT_CORNER_START,
-            top=consts.MAIN_SCREEN_TOP_CORNER_START,
-            height=consts.MAIN_SCREEN_HEIGHT,
-            parent=self,
+        self.screen = MainApp(
             user=user,
         )
         self.screen.show()
@@ -291,15 +282,15 @@ class LoginForm(QWidget):
         pass
 
 
-class MainAppA(QMainWindow):
+class MainApp(QMainWindow):
 
-    def __init__(self, title, left, top, height, parent=None, user=None):
-        super(MainAppA, self).__init__(parent)
+    def __init__(self, user=None):
+        super(MainApp, self).__init__()
 
-        self.__init_ui(title, left, top, height)
+        self.__init_ui()
 
         self.user = user
-        self.parent = parent
+        self.floating_bar = None
 
         self.tasks_qlist_dict = {}
         self.tasks_timers_dict = {}
@@ -323,17 +314,113 @@ class MainAppA(QMainWindow):
         if os.path.exists(consts.REMEMBER_LAST_ACTIVE_FILE_PATH):
             self.__fill_with_last_active_project()
 
-        if self.user.sync_data:  # TODO: ned the interval of updates
-            self.periodic_duration_sync = Periodic(
-                consts.DURATIONS_UPLOAD_INTERVAL,
-                lambda: Sync.update_project_timelines_request(user=self.user)
-            )
-        else:
-            self.periodic_duration_sync = None
+        # Durations Uploader
+        if self.user.sync_data:
+            # ################################## #
+            # Must Stop Threads, No need to stop #
+            # ################################## #
+            self.periodic_screenshots_taker = Periodic(
+                self.user.screenshot_interval * 60,
+                lambda: utils.take_screenshot(
+                    user_id=self.user.id,
+                    blur=self.user.blur_screen,
+                    directory=consts.OUTPUT_DIR,
+                    format=consts.IMAGE_DATE_TIME_FORMATS,
+                ))
 
-        # if settings.take_screenshots:
-        #     # TODO: time intervals should be from the DB
-        #     screens = Periodic(5, lambda: utils.take_screenshot(consts.OUTPUT_DIR, settings.blur_screen))
+            # ############################### #
+            # Daemon threads, No need to stop #
+            # ############################### #
+            self.inputs_tracker = InputsObserver(auto_start=True)
+            self.screenshots_watcher = ScreenShotDirectoryWatcher(consts.OUTPUT_DIR, auto_start=True)
+
+            # TODO: this one needs further implementation
+            self.idle_time_tracker = StoppableThread(
+                target=self.init_idle_time_watcher,
+                daemon=True
+            )
+            self.idle_time_tracker.start()
+
+            self.init_window_activity_watcher()
+
+        else:
+            self.inputs_tracker = None
+            self.periodic_screenshots_taker = None
+            self.screenshots_watcher = None
+            self.idle_time_tracker = None
+            self.window_activity_tracker, self.parent_conn, self.child_conn = None, None, None
+
+    def init_idle_time_watcher(self):
+        from common.logs import setup_logging
+        from idle_watcher.afk import AFKWatcher
+        from idle_watcher.config import parse_args
+
+        args = parse_args()
+
+        # Set up logging
+        setup_logging(
+            "aw-watcher-afk",
+            testing=args.testing,
+            verbose=args.verbose,
+            log_stderr=True,
+            log_file=True,
+        )
+
+        # Start watcher
+        watcher = AFKWatcher(args, self.user, testing=args.testing)
+        watcher.run()
+        pass
+
+    def init_window_activity_watcher(self):
+        from active_window_watcher.main_window_watcher import main
+
+        self.parent_conn, self.child_conn = Pipe()
+        self.window_activity_tracker = Process(target=main, args=(self.child_conn, self.user), daemon=True)
+        self.window_activity_tracker.start()
+
+    def __flush(self):
+        for sub_id in self.tasks_timers_dict:
+            if self.tasks_timers_dict[sub_id].flag:
+                self.tasks_timers_dict[sub_id].pause()
+
+        if self.active_project is not None:
+            utils.remember_me(
+                self.active_project,
+                consts.REMEMBER_LAST_ACTIVE_FILE_PATH
+            )
+        if self.periodic_screenshots_taker is not None:
+            self.periodic_screenshots_taker.stop()
+
+        # if self.periodic_duration_sync is not None:
+        #     self.periodic_duration_sync.stop()
+
+        # if self.periodic_screenshot_sync is not None:
+        #     self.periodic_screenshot_sync.stop()
+
+        self.inputs_tracker = None
+        self.periodic_screenshots_taker = None
+        self.screenshots_watcher = None
+        self.idle_time_tracker = None
+        self.window_activity_tracker = None
+        # TODO: we need to clear all tables if the user sign-out
+
+    def _force_stop_processes(self):
+        try:
+            if self.window_activity_tracker is not None:
+                self.window_activity_tracker.terminate()
+        except Exception as e:
+            print('Active window watcher stopped')
+
+        # TODO: this one causing issues on force_stop
+        if self.idle_time_tracker is not None:
+            self.idle_time_tracker.stop()
+
+        if self.screenshots_watcher is not None:
+            self.screenshots_watcher.stop()
+
+        # TODO: this one causing issues on force_stop
+        # if self.inputs_tracker is not None:
+        #     self.inputs_tracker.stop()
 
     def __create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -354,21 +441,8 @@ class MainAppA(QMainWindow):
         self.exit_action.triggered.connect(self.closeEvent)
         file_menu.addAction(self.exit_action)
 
-    def __flush(self):
-        for sub_id in self.tasks_timers_dict:
-            if self.tasks_timers_dict[sub_id].flag:
-                self.tasks_timers_dict[sub_id].pause()
-
-        if self.active_project is not None:
-            utils.remember_me(
-                self.active_project,
-                consts.REMEMBER_LAST_ACTIVE_FILE_PATH
-            )
-        if self.periodic_duration_sync is not None:
-            self.periodic_duration_sync.stop()
-            # del self.periodic_duration_sync
-
     def __logout(self):
+        self._force_stop_processes()
         self.__flush()
 
         if os.path.exists(consts.REMEMBER_ME_FILE_PATH):
@@ -377,21 +451,26 @@ class MainAppA(QMainWindow):
         if os.path.exists(consts.REMEMBER_LAST_ACTIVE_FILE_PATH):
             os.remove(consts.REMEMBER_LAST_ACTIVE_FILE_PATH)
 
-        # self.parent.show()
         LoginForm(state='reverse').show()
         self.hide()
         self.destroy()
         self.close()
 
-    def __init_ui(self, title, left, top, height):
-        self.setWindowTitle(title)
-        self.setGeometry(left, top, int(height * 1.61), height)
+    def __init_ui(self, ):
+        self.setWindowTitle(consts.APP_NAME)
+        width = int(consts.MAIN_SCREEN_HEIGHT * 1.61)
+        self.setGeometry(
+            consts.MAIN_SCREEN_LEFT_CORNER_START,
+            consts.MAIN_SCREEN_TOP_CORNER_START,
+            width,
+            consts.MAIN_SCREEN_HEIGHT,
+        )
 
-        self.setMinimumHeight(height)
-        self.setMaximumHeight(height)
+        self.setMinimumHeight(consts.MAIN_SCREEN_HEIGHT)
+        self.setMaximumHeight(consts.MAIN_SCREEN_HEIGHT)
 
-        self.setMinimumWidth(int(height * 1.46))
-        self.setMaximumWidth(int(height * 1.46))
+        self.setMinimumWidth(width)
+        self.setMaximumWidth(width)
         # self.setWindowIcon(QIcon('logo.png'))
 
     def __init_layouts(self):
@@ -420,10 +499,10 @@ class MainAppA(QMainWindow):
         self.lbl_worked_today = QLabel('Worked Today: ')
         title_layout.addWidget(self.lbl_worked_today, 2, 2)
 
-        # self.lbl_project_time_tracker = models.TimeTracker()
+        # self.lbl_project_time_tracker = models.TimeTracker(icon_flag=False)
         # title_layout.addWidget(self.lbl_project_time_tracker, 0, 2)
 
-        self.lbl_task_time_tracker = TimeTracker()
+        self.lbl_task_time_tracker = TimeTracker(icon_flag=False)
         title_layout.addWidget(self.lbl_task_time_tracker, 1, 1)
 
         self.lbl_total_time_tracker = TimeTracker()
@@ -448,7 +527,7 @@ class MainAppA(QMainWindow):
             print('Try loading the projects from the local database...')
             projects_df = db.execute(SQLs.SELECT_ALL_PROJECTS_WHERE_COMPANY.format(
                 company_id=self.user.company_id,
-            ), conn_s=MainController.DB_CONNECTION)
+            ), conn=MainController.DB_CONNECTION)
 
             if projects_df.empty:
                 msg.setText(
@@ -480,7 +559,7 @@ class MainAppA(QMainWindow):
             print('Try loading the tasks from the local database...')
             tasks_df = db.execute(SQLs.SELECT_ALL_TASKS_IN_PROJECTS.format(
                 project_id_tuple=tuple([p.id for p in self.projects])
-            ), conn_s=MainController.DB_CONNECTION)
+            ), conn=MainController.DB_CONNECTION)
 
             if tasks_df.empty:
                 msg.setText(
@@ -533,8 +612,8 @@ class MainAppA(QMainWindow):
 
         df = db.execute(SQLs.SELECT_DURATIONS_WHERE_USER_AND_DATE.format(
             user=self.user.id,
-            today=datetime.today().strftime('%Y%m%d')
-        ), conn_s=MainController.DB_CONNECTION)
+            today=datetime.today().strftime(consts.DAY_TIME_FORMAT)
+        ), conn=MainController.DB_CONNECTION)
         self.lbl_total_time_tracker.reset(pd.to_timedelta(df.duration).sum())
 
     def __show_project_ui(self, item, ):
@@ -550,8 +629,8 @@ class MainAppA(QMainWindow):
         df = db.execute(SQLs.SELECT_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE.format(
             user=self.user.id,
             project_id=project.id,
-            today=datetime.today().strftime('%Y%m%d')
-        ), conn_s=MainController.DB_CONNECTION)
+            today=datetime.today().strftime(consts.DAY_TIME_FORMAT)
+        ), conn=MainController.DB_CONNECTION)
         self.duration = pd.to_timedelta(df.duration).sum()
 
         # if type(item) is db_models.Project:  # if and only if reloaded from remember me
@@ -578,8 +657,8 @@ class MainAppA(QMainWindow):
                 SQLs.SELECT_TASKID_AND_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE.format(
                     user=self.user.id,
                     project_id=project.id,
-                    today=datetime.today().strftime('%Y%m%d')
-                ), conn_s=MainController.DB_CONNECTION)
+                    today=datetime.today().strftime(consts.DAY_TIME_FORMAT)
+                ), conn=MainController.DB_CONNECTION)
 
             if not df.empty:
                 df.duration = pd.to_timedelta(df.duration)
@@ -643,6 +722,12 @@ class MainAppA(QMainWindow):
         )[0]
         self.active_task = task
 
+        # TODO: Another methodology to track this ?
+        ####################################################################
+        MainController.CURRENT_ACTIVE_PROJECT_ID = task.project_id
+        MainController.CURRENT_ACTIVE_TASK_ID = task.id
+        ####################################################################
+
         # Fill the titles
         self.lbl_active_project.setText(self.active_project.name)
         self.lbl_active_task.setText(task.name)
@@ -676,3 +761,140 @@ class MainAppA(QMainWindow):
             return None
 
         self.__show_project_ui(project)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.WindowStateChange:
+            if event.oldState() and Qt.WindowState.WindowMinimized:
+                print("WindowMaximized")
+                self.show()
+                self.floating_bar.hide()
+                self.floating_bar.destroy()
+                self.floating_bar.close()
+            elif event.oldState() == Qt.WindowState.WindowNoState or self.windowState() == Qt.WindowState.WindowMaximized:
+                print(self.active_project)
+                print(self.active_task)
+
+                if self.active_task:
+                    project = self.active_project.name
+                    task = self.active_task.name
+                    time = self.tasks_timers_dict.get(self.active_task.id).time
+                    flag = self.tasks_timers_dict.get(self.active_task.id).flag
+                else:
+                    project = None
+                    task = None
+                    time = timedelta(seconds=0)
+                    flag = False
+
+                self.floating_bar = FloatingDialogBar(
+                    project=project,
+                    task=task,
+                    time=time,
+                    flag=flag,
+                )
+                self.floating_bar.show()
+
+
+class FloatingDialogBar(QWidget):
+
+    def __init__(self, parent=None, project: str = None, task: str = None, time=timedelta(seconds=0), flag=False):
+        super(FloatingDialogBar, self).__init__(parent)
+        self.offset = None
+
+        self.project = project if project else 'N/A'
+        self.task = task if task else 'N/A'
+
+        self.timer = TimeTracker(icon_flag=False)
+        self.timer.reset(time)
+        if flag:
+            self.timer.start()
+
+        self.__init_ui()
+        self.__init_layouts()
+
+    def greetings(self):  # TODO: implement methodology to stop from the floating dialog
+        if self.button.text() == 'Start':
+            self.button.setText('Pause')
+            self.frame.adjustSize()
+            self.adjustSize()
+        else:
+            self.button.setText('Start')
+            self.frame.adjustSize()
+            self.frame.adjustSize()
+            self.adjustSize()
+        pass
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.offset = event.pos()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.offset is not None and event.buttons() == Qt.MouseButton.LeftButton:
+            self.move(self.pos() + event.pos() - self.offset)
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.offset = None
+        super().mouseReleaseEvent(event)
+
+    def __init_ui(self):
+        self.setWindowFlags(
+            self.windowFlags() |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        available_width = MainController.CURRENT_COMPUTER_SCREEN.availableSize().width()
+        available_height = MainController.CURRENT_COMPUTER_SCREEN.availableSize().height()
+
+        left = available_width - int(available_width * (1 - consts.FLOATING_BAR_LEFT_CORNER_START))
+        top = available_height - int(available_height * (1 - consts.FLOATING_BAR_TOP_CORNER_START))
+        self.width = available_width - int(available_width * (1 - consts.FLOATING_BAR_WIDTH_SUBTRACT_RATIO))
+        self.setGeometry(
+            left,
+            top,
+            self.width,
+            consts.FLOATING_BAR_HEIGHT,
+        )
+        self.setMaximumWidth(self.width)
+        self.setMinimumWidth(self.width)
+        self.setMinimumHeight(consts.FLOATING_BAR_HEIGHT)
+        self.setMaximumHeight(consts.FLOATING_BAR_HEIGHT)
+        pass
+
+    def __init_layouts(self):
+        self.frame = QFrame(self)
+        self.frame.setStyleSheet(consts.FLOATING_BAR_STYLESHEET)
+        # Create widgets
+        layout = QHBoxLayout()
+
+        self.lbl_project = QLabel(self.project)
+        self.lbl_project.setStyleSheet(consts.FLOATING_BAR_QLabel_STYLESHEET)
+        layout.addWidget(self.lbl_project)
+
+        self.lbl_task = QLabel(self.task)
+        self.lbl_task.setStyleSheet(consts.FLOATING_BAR_QLabel_STYLESHEET)
+        layout.addWidget(self.lbl_task)
+
+        # self.lbl_timer = QLabel('Timer')
+        # self.lbl_timer.setStyleSheet(consts.FLOATING_BAR_QLabel_STYLESHEET)
+        layout.addWidget(self.timer)
+
+        self.button = QPushButton("Start")
+        # self.button.setStyleSheet(consts.FLOATING_BAR_QPushButton_STYLESHEET)
+        # self.button.clicked.connect(self.greetings)
+        # layout.addWidget(self.button)
+
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.frame.setLayout(layout)
+
+        self.frame.setMaximumWidth(self.width)
+        self.frame.setMinimumWidth(self.width)
+
+        self.frame.setMinimumHeight(consts.FLOATING_BAR_HEIGHT)
+        self.frame.setMaximumHeight(consts.FLOATING_BAR_HEIGHT)
+
+        pass

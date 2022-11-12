@@ -3,24 +3,16 @@ import sys
 
 from PyQt6.QtWidgets import QApplication
 
-from scripts import views, db, consts
+from scripts import views
+from common import consts
 from scripts.controllers import MainController
 
 
-# TODO: Check what changes the datatypes in teh databases
-# TODO: Validate the double insert behaviour of the first task in the first loaded project
-# TODO: Remove the double click behavior over the tasks
-# TODO: More modifications over the UI/UX
-
-# TODO: Check why multiple users continue to each other
-
 def main(args):
-    try:
-        conn = db.create_db_connection()
-        MainController.initiate_database_connection(conn)
 
+    try:
+        MainController.initiate_database_connection(consts.DB_PATH)
     except Exception as e:
-        print(e)
         raise Exception("Couldn't establish a database connection.")
 
     # db_models.initiate_database_models(conn)
@@ -33,20 +25,21 @@ def main(args):
     #     print(e)
     #     raise Exception("Couldn't establish the settings.")
 
+    app = QApplication(args)
+    MainController.store_screen_details(app.primaryScreen())
     try:
-        app = QApplication(args)
         form = views.LoginForm()
         if not os.path.exists(consts.REMEMBER_ME_FILE_PATH):
             form.show()
-        code = app.exec()
 
-        MainController.close_database_connection()
-        sys.exit(code)
     except Exception as e:
         print(e)
         raise e
     finally:
-        pass
+        if MainController.DB_CONNECTION is not None:
+            MainController.close_database_connection()
+    code = app.exec()
+    sys.exit(code)
 
 
 if __name__ == '__main__':
