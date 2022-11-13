@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 
 
-from database import db
+# from database import db
 from common import consts
 
 
@@ -67,10 +67,10 @@ class MainController:
     def store_settings(cls, settings):
         MainController.SETTINGS = settings
 
-    @classmethod
-    def initiate_database_connection(cls, ):
-        if MainController.DB_CONNECTION is None:
-            MainController.DB_CONNECTION = db.create_db_connection()
+    # @classmethod
+    # def initiate_database_connection(cls, ):
+    #     if MainController.DB_CONNECTION is None:
+    #         MainController.DB_CONNECTION = db.create_db_connection()
 
     @classmethod
     def close_database_connection(cls, ):

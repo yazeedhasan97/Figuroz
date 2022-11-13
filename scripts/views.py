@@ -1,6 +1,6 @@
 import os, re
 from datetime import timedelta, datetime
-from multiprocessing import Process, Pipe
+from multiprocessing import Pipe, Process
 
 from PyQt6 import QtGui
 from PyQt6.QtCore import Qt, QEvent
@@ -17,6 +17,8 @@ from scripts.custom_views import QClickableLabel, TimeTracker, CustomTimer
 
 from database.models import User, Task, Project, ProjectTimeLine, crete_user_from_api, create_projects_from_api, \
     create_tasks_from_api, create_project_time_line
+
+from active_window_watcher.main_window_watcher import create_active_window_watcher
 
 
 class ForgetPasswordForm(QWidget):
@@ -298,6 +300,10 @@ class MainApp(QMainWindow):
         self.periodic_screenshots_capturer = None
         self.periodic_idle_capturer = None
         self.inputs_tracker = None
+        self.window_activity_tracker = None
+        self.window_watcher = None
+        self.parent_conn = None
+        self.child_conn = None
 
         if self.user.sync_data:
             self.start_observers_and_schedulers()
@@ -305,7 +311,7 @@ class MainApp(QMainWindow):
     def start_observers_and_schedulers(self):
         # Durations Uploader
 
-        # ################################## #
+        # ################################## #l
         # Must Stop Threads, No need to stop #
         # ################################## #
         screen_capturer = ScreenshotsCapture(
@@ -331,10 +337,15 @@ class MainApp(QMainWindow):
             idle_capturer.heartbeat
         )
 
-    def init_window_activity_watcher(self):
-        from active_window_watcher.main_window_watcher import main
+        self.window_watcher = create_active_window_watcher(
+            user_id=self.user.id,
+        )
         self.parent_conn, self.child_conn = Pipe()
-        self.window_activity_tracker = Process(target=main, args=(self.child_conn, self.user), daemon=True)
+        self.window_activity_tracker = Process(
+            target=self.window_watcher.run,
+            # args=(child_conn, user),
+            daemon=True,
+        )
         self.window_activity_tracker.start()
 
     def __flush(self):
@@ -359,36 +370,16 @@ class MainApp(QMainWindow):
         if self.inputs_tracker is not None:
             self.inputs_tracker.stop()
 
-        # if self.periodic_duration_sync is not None:
-        #     self.periodic_duration_sync.stop()
-
-        # if self.periodic_screenshot_sync is not None:
-        #     self.periodic_screenshot_sync.stop()
-
-        # self.inputs_tracker = None
-        # self.periodic_screenshots_taker = None
-        # self.idle_time_tracker = None
-        # self.window_activity_tracker = None
-        # TODO: we need to clear all tables if the user sign-out
-        #  OR JUST MAKE SURE THERE IS A USER COLUMN IN ALL
-
-    def _force_stop_processes(self):
-        try:
-            if self.window_activity_tracker is not None:
+        if self.window_activity_tracker is not None:
+            try:
+                self.window_activity_tracker.kill()
                 self.window_activity_tracker.terminate()
-        except Exception as e:
-            print('Active window watcher stopped')
-
-        # # TODO: this one causing issues on force_stop
-        # if self.idle_time_tracker is not None:
-        #     self.idle_time_tracker.stop()
-        #
-        # if self.screenshots_watcher is not None:
-        #     self.screenshots_watcher.stop()
-
-        # TODO: this one causing issues on force_stop
-        # if self.inputs_tracker is not None:
-        #     self.inputs_tracker.stop()
+                self.window_activity_tracker.join()
+                self.window_activity_tracker.close()
+                self.parent_conn.close()
+                self.child_conn.close()
+            except Exception as e:
+                print(e)
 
     def __create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -396,11 +387,7 @@ class MainApp(QMainWindow):
         file_menu = QMenu("&File", self)
         menu_bar.addMenu(file_menu)
 
-        self.screenshot_action = QAction("&Screenshot...", self)
-        self.screenshot_action.triggered.connect(utils.take_screenshot)
-        file_menu.addAction(self.screenshot_action)
         file_menu.addSeparator()
-
         self.logout_action = QAction("&Logout", self)
         self.logout_action.triggered.connect(self.__logout)
         file_menu.addAction(self.logout_action)

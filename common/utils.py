@@ -6,11 +6,9 @@ import os
 import pickle
 from datetime import datetime, timedelta
 from typing import Union
-import io
-import pandas as pd
+# import pandas as pd
 import geocoder
 
-from common import consts
 
 # logging.debug('This is a debug message')
 # logging.info('This is an info message')
@@ -68,11 +66,11 @@ def extract_before_from(text: str, find: str):
     return text[:text.find(find) + len(find)]
 
 
-def create_df_from_object(obj):
-    df = pd.DataFrame(obj).T
-    df.columns = df.iloc[0]
-    df = df.drop(0, ).reset_index(drop=True)
-    return df
+# def create_df_from_object(obj):
+#     df = pd.DataFrame(obj).T
+#     df.columns = df.iloc[0]
+#     df = df.drop(0, ).reset_index(drop=True)
+#     return df
 
 
 # def calculate_internet_speed():
@@ -97,9 +95,4 @@ def timer(func):
 
 
 if __name__ == "__main__":
-    print(take_screenshot(
-        user_id=182,
-        format=consts.IMAGE_DATE_TIME_FORMATS,
-        directory=consts.OUTPUT_DIR,
-        blur=True,
-    ))
+    pass

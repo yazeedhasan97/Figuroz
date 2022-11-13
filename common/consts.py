@@ -19,6 +19,7 @@ HIDDEN_EYE_ICON_PATH = os.path.join(ASSETS_DIR, 'unhidden_eye.png')
 UNHIDDEN_EYE_ICON_PATH = os.path.join(ASSETS_DIR, 'hidden_eye.png')
 
 DB_PATH = os.path.join(ENV_DIR, 'local.db')
+TEST_DB_PATH = os.path.join(ENV_DIR, 'new_local.db')
 
 FORGET_PASSWORD_SCREEN_HEIGHT = 200
 FORGET_PASSWORD_WIDTH = 340

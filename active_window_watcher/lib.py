@@ -58,9 +58,9 @@ def get_current_window_windows() -> Optional[dict]:
 
     return {
         "pid": pid,
-        "name": app[:app.rfind('.')].title(),
-        "path": path,  # also called window url
-        "title": title,
+        "name": app[:app.rfind('.')].lower(),
+        "path": path.lower(),  # also called window url
+        "title": title.lower(),
         "version": version,
         "description": '',
         "url": '',

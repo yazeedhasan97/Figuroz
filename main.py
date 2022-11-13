@@ -1,3 +1,4 @@
+
 import os
 import sys
 
@@ -14,10 +15,16 @@ def main(args):
     api_sync = MasterSync('test')
     MainController.store_api_connection(api_sync)
 
-    db_sync = create_database_session('C:/Users/yazee/PycharmProjects/Figuroz/env/new_local.db', echo=False)
+    db_sync = create_database_session(
+        consts.TEST_DB_PATH,
+        echo=False,
+    )
+    # db_sync = create_database_session('/home/meqdad/Downloads/yazeed/Figuroz/env/new_local.db', echo=False)
     MainController.store_database_connection(db_sync)
 
-    app = QApplication(sys.argv)
+    app = QApplication(args)
+    MainController.store_screen_details(app.primaryScreen())
+
     try:
         form = LoginForm()
         if not os.path.exists(consts.REMEMBER_ME_FILE_PATH):

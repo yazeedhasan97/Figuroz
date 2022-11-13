@@ -9,7 +9,7 @@ class Model(ABC):
 
     def __str__(self):
         return f"{type(self).__name__}(" + ', '.join(
-            [f"{attr[attr.rfind('__') + 2:]}={value}" for attr, value in self.__dict__.items()]
+            [f"{attr[attr.rfind('__') + 1:]}={value}" for attr, value in self.__dict__.items()]
         ) + ")"
 
     def __repr__(self):
