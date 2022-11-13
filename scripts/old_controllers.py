@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from database import models, db
+from database import old_models, db
 from common import consts, utils
 
 from watchdog.observers import Observer
@@ -148,7 +148,7 @@ class TimerObserver(AbstractObserver):
 
     def create(self, ids: dict) -> None:
         print('Create The Time Line')
-        from database.new_models import create_project_time_line
+        from database.models import create_project_time_line
         self._tracker = create_project_time_line(
             project_id=ids['project_id'],
             task_id=ids['task_id'],

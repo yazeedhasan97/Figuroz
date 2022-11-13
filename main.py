@@ -3,32 +3,23 @@ import sys
 
 from PyQt6.QtWidgets import QApplication
 
-from scripts import views
+from apis.sync import MasterSync
+from database.models import create_database_session
 from common import consts
 from scripts.controllers import MainController
+from scripts.views import LoginForm
 
 
 def main(args):
+    api_sync = MasterSync('test')
+    MainController.store_api_connection(api_sync)
 
+    db_sync = create_database_session('C:/Users/yazee/PycharmProjects/Figuroz/env/new_local.db', echo=False)
+    MainController.store_database_connection(db_sync)
+
+    app = QApplication(sys.argv)
     try:
-        MainController.initiate_database_connection(consts.DB_PATH)
-    except Exception as e:
-        raise Exception("Couldn't establish a database connection.")
-
-    # db_models.initiate_database_models(conn)
-
-    # try:
-    #     settings = db_models.Settings.load_settings(conn)
-    #     MainController.initiate_settings(settings)
-    #
-    # except Exception as e:
-    #     print(e)
-    #     raise Exception("Couldn't establish the settings.")
-
-    app = QApplication(args)
-    MainController.store_screen_details(app.primaryScreen())
-    try:
-        form = views.LoginForm()
+        form = LoginForm()
         if not os.path.exists(consts.REMEMBER_ME_FILE_PATH):
             form.show()
 
@@ -36,8 +27,7 @@ def main(args):
         print(e)
         raise e
     finally:
-        if MainController.DB_CONNECTION is not None:
-            MainController.close_database_connection()
+        pass
     code = app.exec()
     sys.exit(code)
 

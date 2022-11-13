@@ -151,8 +151,8 @@ class CustomTimer(QWidget, ObservedTimer, metaclass=CustomTimerMeta):
         if self.__running_count == 1:
             self.notify({
                 'project_id': self.__time_line.project_id,
-                'sub_id': self.__time_line.sub_id,
-                'user': self.__time_line.user,
+                'task_id': self.__time_line.task_id,
+                'user_id': self.__time_line.user_id,
             })
             # self.__time_line.time_start = datetime.now().time()
 
@@ -165,8 +165,8 @@ class CustomTimer(QWidget, ObservedTimer, metaclass=CustomTimerMeta):
         self.__running_count = 0
         self.notify({
             'project_id': self.__time_line.project_id,
-            'sub_id': self.__time_line.sub_id,
-            'user': self.__time_line.user,
+            'task_id': self.__time_line.task_id,
+            'user_id': self.__time_line.user_id,
         }, state='update')
 
         return self

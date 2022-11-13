@@ -2,8 +2,6 @@ PyQt6
 sshtunnel
 sqlalchemy
 sqlalchemy-utils
-pandas
-numpy
 iso8601
 Pillow
 requests
@@ -17,4 +15,4 @@ python-xlib
 wmi # WMI
 tomlkit
 appdirs
-# splinter
+joblib

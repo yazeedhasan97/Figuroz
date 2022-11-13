@@ -48,7 +48,7 @@ IMAGE_DATE_TIME_FORMATS = '%Y-%m-%dT%H%M%S.%f'
 IDLE_SECONDS_THRESHOLD = 90
 EXTRA_IDLE_SECONDS_THRESHOLD = 180
 
-MOUSE_MOVE_DIVIDER = 13
+MOUSE_MOVE_DIVIDER = 21  # Primary
 
 WEB_BROWSERS = ["Safari", "Chrome", "Chromium", "Brave Browser", "Firefox", ]
 

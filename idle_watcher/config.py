@@ -7,11 +7,11 @@ from common.config_util import load_config_toml
 
 default_config = """
 [aw-watcher-afk]
-timeout = 180
+timeout = 5
 poll_time = 5
 
 [aw-watcher-afk-testing]
-timeout = 20
+timeout = 5
 poll_time = 1
 """.strip()
 

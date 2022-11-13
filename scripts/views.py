@@ -1,23 +1,22 @@
-import json
-import os
-import re
+import os, re
 from datetime import timedelta, datetime
 from multiprocessing import Process, Pipe
-import pandas as pd
+
 from PyQt6 import QtGui
 from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtWidgets import QWidget, QListWidget, QGridLayout, \
     QLabel, QMenu, QMainWindow, QLayout, QListWidgetItem, \
-    QAbstractItemView, QMessageBox, QLineEdit, QPushButton, QCheckBox, QVBoxLayout, QStatusBar, QFrame, QHBoxLayout
+    QAbstractItemView, QMessageBox, QLineEdit, QPushButton, QCheckBox, QVBoxLayout, QFrame, QHBoxLayout
 from PyQt6.QtGui import QIcon, QAction
 
-from database import db, SQLs
+# Custom Modules
 from common import consts, utils
-from database.models import User, Task, Project, ProjectTimeLine
-from scripts.controllers import MainController, ScreenShotDirectoryWatcher, InputsObserver, StoppableThread
-from apis.sync import Sync
+from scripts.trackers import Periodic, ScreenshotsCapture
+from scripts.controllers import MainController, InputsObserver
 from scripts.custom_views import QClickableLabel, TimeTracker, CustomTimer
-from scripts.trackers import Periodic
+
+from database.models import User, Task, Project, ProjectTimeLine, crete_user_from_api, create_projects_from_api, \
+    create_tasks_from_api, create_project_time_line
 
 
 class ForgetPasswordForm(QWidget):
@@ -83,10 +82,9 @@ class ForgetPasswordForm(QWidget):
             msg.exec()
             return
 
-        res = Sync.send_forget_password_request(email)
+        res = MainController.API_CONNECTION.post_forget_password_request(email=email)
         if res:
             msg.setText('You will receive an email with the details.')
-            print(res)
         else:
             msg.setText("Could not find this user in the system.")
         msg.exec()
@@ -173,12 +171,17 @@ class LoginForm(QWidget):
         pass
 
     def check_password(self):
-        # TODO: Need APIs methodology to validate Password
+
         msg = QMessageBox()
         email = self.lineEdit_username.text().lower()
         password = self.lineEdit_password.text()
         if email is None or not email:
             msg.setText('Please enter an email.')
+            msg.exec()
+            return
+
+        if password is None or not password:
+            msg.setText('Please enter a password.')
             msg.exec()
             return
 
@@ -188,20 +191,15 @@ class LoginForm(QWidget):
             msg.exec()
             return
 
-        if password is None or not password:
-            msg.setText('Please enter a password.')
-            msg.exec()
-            return
-
         user = self.__load_user_data(email, password)
 
-        if user is None or not user:
-            msg.setText("Could not find user in the system.")
-            msg.exec()
-            return
-
         if self.remember_me.isChecked():
-            utils.remember_me(user, consts.REMEMBER_ME_FILE_PATH)
+            utils.remember_me({
+                'email': user.email,
+                'password': user.password,
+            },
+                consts.REMEMBER_ME_FILE_PATH
+            )
 
         print('done checking')
         self.next_screen(user)
@@ -215,57 +213,37 @@ class LoginForm(QWidget):
 
     def __load_user_data(self, email, password):
         msg = QMessageBox()
-        user = Sync.send_login_request(email, password)
-        print(user)
-
-        if not user:
-            user_df = db.execute(SQLs.SELECT_ALL_USERS_WHERE_EMAIL_AND_PASSWORD.format(
-                email=email, password=password
-            ), conn=MainController.DB_CONNECTION)
-
-            if user_df.empty:
-                msg.setText("Password might be incorrect.")
+        user = MainController.DB_CONNECTION.query(User).filter(User.email == email).first()
+        if user:
+            return user
+        else:
+            data = MainController.API_CONNECTION.post_login_request(email, password)
+            if data:
+                user = crete_user_from_api(MainController.DB_CONNECTION, data, password)
+                return user
+            else:
+                msg.setText("Password might be incorrect. User is not found. APIs are down.")
                 msg.exec()
-                return
-
-            user = [User(
-                token=a.token,
-                refresh_token=a.refresh_token,
-                id=a.id,
-                company_id=a.companyId,
-                username=a.username,
-                email_address=a.email_address,
-                password=a.password,
-                status=a.status,
-                access_level=a.access_level,
-                code=a.code,
-                screenshot_interval=a.screenshot_interval,
-                can_edit_time=a.can_edit_time,
-                blur_screen=a.blur_screen,
-                receive_daily_report=a.receive_daily_report,
-                inactive_time=a.inactive_time,
-                can_delete_screencast=a.can_delete_screencast,
-                owner_user=a.owner_user,
-                sync_data=a.sync_data,
-                profile_image=a.profile_image,
-                group_members=json.loads(a.group_members),
-                group_managers=json.loads(a.group_managers),
-            ) for a in user_df.itertuples()][0]
-
-        return user
+                return False
 
     def __try_remember_me_login(self, ):
         msg = QMessageBox()
-        user = utils.get_me(consts.REMEMBER_ME_FILE_PATH)
+        data = utils.get_me(consts.REMEMBER_ME_FILE_PATH)
 
-        if user is None or not user.email_address:
+        if data:
+            user = self.__load_user_data(
+                email=data['email'],
+                password=data['password'],
+            )
+        else:
             msg.setText("Could not load pre-saved user.")
             msg.exec()
             return
 
-        user = self.__load_user_data(user.email_address, user.password)
-
-        utils.remember_me(user, consts.REMEMBER_ME_FILE_PATH)
+        utils.remember_me({
+            'email': user.email,
+            'password': user.password,
+        }, consts.REMEMBER_ME_FILE_PATH)
         self.next_screen(user)
         return True
 
@@ -282,6 +260,14 @@ class LoginForm(QWidget):
         pass
 
 
+def create_tasks_qlist():
+    tasks_qlist = QListWidget()
+    tasks_qlist.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    tasks_qlist.setSpacing(1)
+    tasks_qlist.setStyleSheet(consts.TASKS_LIST_WIDGET_STYLESHEET)
+    return tasks_qlist
+
+
 class MainApp(QMainWindow):
 
     def __init__(self, user=None):
@@ -292,8 +278,8 @@ class MainApp(QMainWindow):
         self.user = user
         self.floating_bar = None
 
-        self.tasks_qlist_dict = {}
-        self.tasks_timers_dict = {}
+        self.tasks_qlist_dict = {}  # KEY is user_id + project_id
+        self.tasks_timers_dict = {}  # KEY is user_id + project_id + task_id
         self.projects = []
         self.projects_time_trackers = {}
         self.active_project = None
@@ -301,95 +287,77 @@ class MainApp(QMainWindow):
         self.duration = timedelta(seconds=0)
 
         self.__init_data()
-
         self.__create_menu_bar()
-
         self.__init_layouts()
-
-        self.setStatusBar(QStatusBar(self))
-
         self.__fill_projects_qlist()
         self.__fill_tasks_qlist_dict()
 
         if os.path.exists(consts.REMEMBER_LAST_ACTIVE_FILE_PATH):
             self.__fill_with_last_active_project()
 
-        # Durations Uploader
+        self.periodic_screenshots_capturer = None
+        self.periodic_idle_capturer = None
+        self.inputs_tracker = None
+
         if self.user.sync_data:
-            # ################################## #
-            # Must Stop Threads, No need to stop #
-            # ################################## #
-            self.periodic_screenshots_taker = Periodic(
-                self.user.screenshot_interval * 60,
-                lambda: utils.take_screenshot(
-                    user_id=self.user.id,
-                    blur=self.user.blur_screen,
-                    directory=consts.OUTPUT_DIR,
-                    format=consts.IMAGE_DATE_TIME_FORMATS,
-                ))
+            self.start_observers_and_schedulers()
 
-            # ############################### #
-            # Daemon threads, No need to stop #
-            # ############################### #
-            self.inputs_tracker = InputsObserver(auto_start=True)
-            self.screenshots_watcher = ScreenShotDirectoryWatcher(consts.OUTPUT_DIR, auto_start=True)
+    def start_observers_and_schedulers(self):
+        # Durations Uploader
 
-            # TODO: this one needs further implementation
-            self.idle_time_tracker = StoppableThread(
-                target=self.init_idle_time_watcher,
-                daemon=True
-            )
-            self.idle_time_tracker.start()
-
-            self.init_window_activity_watcher()
-
-        else:
-            self.inputs_tracker = None
-            self.periodic_screenshots_taker = None
-            self.screenshots_watcher = None
-            self.idle_time_tracker = None
-            self.window_activity_tracker, self.parent_conn, self.child_conn = None, None, None
-
-    def init_idle_time_watcher(self):
-        from common.logs import setup_logging
-        from idle_watcher.afk import AFKWatcher
-        from idle_watcher.config import parse_args
-
-        args = parse_args()
-
-        # Set up logging
-        setup_logging(
-            "aw-watcher-afk",
-            testing=args.testing,
-            verbose=args.verbose,
-            log_stderr=True,
-            log_file=True,
+        # ################################## #
+        # Must Stop Threads, No need to stop #
+        # ################################## #
+        screen_capturer = ScreenshotsCapture(
+            user_id=self.user.id,
+            directory=consts.OUTPUT_DIR,
+            blur=self.user.blur_screen,
         )
+        self.periodic_screenshots_capturer = Periodic(
+            self.user.screenshot_interval * 60,
+            screen_capturer.run
+        )
+        self.inputs_tracker = InputsObserver(auto_start=True)
 
-        # Start watcher
-        watcher = AFKWatcher(args, self.user, testing=args.testing)
-        watcher.run()
-        pass
+        from idle_watcher.afk import AFKWatcher
+
+        # Start Idle Watcher
+        idle_capturer = AFKWatcher(
+            user_id=self.user.id,
+            timeout=self.user.inactive_interval * 60,
+        )
+        self.periodic_idle_capturer = Periodic(
+            1,
+            idle_capturer.heartbeat
+        )
 
     def init_window_activity_watcher(self):
         from active_window_watcher.main_window_watcher import main
-
         self.parent_conn, self.child_conn = Pipe()
         self.window_activity_tracker = Process(target=main, args=(self.child_conn, self.user), daemon=True)
         self.window_activity_tracker.start()
 
     def __flush(self):
-        for sub_id in self.tasks_timers_dict:
-            if self.tasks_timers_dict[sub_id].flag:
-                self.tasks_timers_dict[sub_id].pause()
+        for id in self.tasks_timers_dict:
+            if self.tasks_timers_dict[id].flag:
+                self.tasks_timers_dict[id].pause()
 
         if self.active_project is not None:
-            utils.remember_me(
-                self.active_project,
+            utils.remember_me({
+                'id': self.active_project.id,
+                'name': self.active_project.name,
+                'user_id': self.active_project.user_id,
+            },
                 consts.REMEMBER_LAST_ACTIVE_FILE_PATH
             )
-        if self.periodic_screenshots_taker is not None:
-            self.periodic_screenshots_taker.stop()
+        if self.periodic_screenshots_capturer is not None:
+            self.periodic_screenshots_capturer.stop()
+
+        if self.periodic_idle_capturer is not None:
+            self.periodic_idle_capturer.stop()
+
+        if self.inputs_tracker is not None:
+            self.inputs_tracker.stop()
 
         # if self.periodic_duration_sync is not None:
         #     self.periodic_duration_sync.stop()
@@ -397,12 +365,12 @@ class MainApp(QMainWindow):
         # if self.periodic_screenshot_sync is not None:
         #     self.periodic_screenshot_sync.stop()
 
-        self.inputs_tracker = None
-        self.periodic_screenshots_taker = None
-        self.screenshots_watcher = None
-        self.idle_time_tracker = None
-        self.window_activity_tracker = None
+        # self.inputs_tracker = None
+        # self.periodic_screenshots_taker = None
+        # self.idle_time_tracker = None
+        # self.window_activity_tracker = None
         # TODO: we need to clear all tables if the user sign-out
+        #  OR JUST MAKE SURE THERE IS A USER COLUMN IN ALL
 
     def _force_stop_processes(self):
         try:
@@ -411,12 +379,12 @@ class MainApp(QMainWindow):
         except Exception as e:
             print('Active window watcher stopped')
 
-        # TODO: this one causing issues on force_stop
-        if self.idle_time_tracker is not None:
-            self.idle_time_tracker.stop()
-
-        if self.screenshots_watcher is not None:
-            self.screenshots_watcher.stop()
+        # # TODO: this one causing issues on force_stop
+        # if self.idle_time_tracker is not None:
+        #     self.idle_time_tracker.stop()
+        #
+        # if self.screenshots_watcher is not None:
+        #     self.screenshots_watcher.stop()
 
         # TODO: this one causing issues on force_stop
         # if self.inputs_tracker is not None:
@@ -442,7 +410,7 @@ class MainApp(QMainWindow):
         file_menu.addAction(self.exit_action)
 
     def __logout(self):
-        self._force_stop_processes()
+        # self._force_stop_processes()
         self.__flush()
 
         if os.path.exists(consts.REMEMBER_ME_FILE_PATH):
@@ -518,67 +486,71 @@ class MainApp(QMainWindow):
         self.sub_projects_layout = QVBoxLayout()
         layout.addLayout(self.sub_projects_layout, 2, 1, )
 
+    def __fill_tasks_qlist_dict(self):
+        for project in self.projects:
+            tasks_qlist = create_tasks_qlist()
+            data = self.load_total_durations_per_task_and_day(project.id)
+
+            for task in project.tasks:
+                timeline = create_project_time_line(
+                    user_id=self.user.id,
+                    project_id=project.id,
+                    task_id=task.id
+                )
+
+                if data and task.id in data.keys():
+                    timeline.duration = data.get(task.id, timedelta(seconds=0))
+
+                tasks_timers_dict_id = ''.join([str(self.user.id), str(project.id), str(task.id)])
+                self.tasks_timers_dict[tasks_timers_dict_id] = CustomTimer(timeline, )
+                self.tasks_timers_dict[tasks_timers_dict_id].attach(tasks_timers_dict_id)
+
+                item = QListWidgetItem()
+                item.setText(task.name)
+                item.setData(Qt.ItemDataRole.UserRole, task)
+                tasks_qlist.addItem(item)
+                tasks_qlist.setItemWidget(item, self.tasks_timers_dict[tasks_timers_dict_id])
+
+            tasks_qlist_dict_id = ''.join([str(self.user.id), str(project.id)])
+            self.tasks_qlist_dict[tasks_qlist_dict_id] = tasks_qlist
+
     def __load_projects_related_data(self, ):
         msg = QMessageBox()
-        projects = Sync.get_projects_request(self.user.token)
-        print(projects)
+        projects = MainController.DB_CONNECTION.query(Project).filter(Project.user_id == self.user.id).all()
 
-        if not projects:  # If success insert to db else, load from db
-            print('Try loading the projects from the local database...')
-            projects_df = db.execute(SQLs.SELECT_ALL_PROJECTS_WHERE_COMPANY.format(
-                company_id=self.user.company_id,
-            ), conn=MainController.DB_CONNECTION)
-
-            if projects_df.empty:
+        if projects:
+            self.projects = projects
+        else:
+            data = MainController.API_CONNECTION.get_projects_request(self.user.token)
+            if data:
+                projects = create_projects_from_api(MainController.DB_CONNECTION, data, self.user.id)
+                self.projects = projects
+            else:
                 msg.setText(
                     "Could not load any project for this user."
                     "\nTheir might be no projects assigned to this user."
                 )
                 msg.exec()
-                return
-
-            print('Projects data successfully loaded from the local database')
-            self.projects = [Project(
-                id=a.id,
-                name=a.projectName.title(),
-                status=a.status,
-                company_id=a.companyId,
-                project_access=a.projectAccess,
-                project_groups=json.loads(a.projectGroups),
-                project_members=json.loads(a.projectMembers),
-            ) for a in projects_df.itertuples()]
-        else:
-            self.projects = projects
+                return False
 
     def __load_tasks_related_data(self):
         msg = QMessageBox()
-        tasks = Sync.get_tasks_request(self.user.token)
-        print(tasks)
-
-        if not tasks:
-            print('Try loading the tasks from the local database...')
-            tasks_df = db.execute(SQLs.SELECT_ALL_TASKS_IN_PROJECTS.format(
-                project_id_tuple=tuple([p.id for p in self.projects])
-            ), conn=MainController.DB_CONNECTION)
-
-            if tasks_df.empty:
+        tasks = MainController.DB_CONNECTION.query(Task).filter(Task.user_id == self.user.id).all()
+        if tasks:
+            return tasks
+        else:
+            data = MainController.API_CONNECTION.get_tasks_request(self.user.token)
+            if data:
+                tasks = create_tasks_from_api(MainController.DB_CONNECTION, data, self.user.id)
+                return tasks
+            else:
                 msg.setText(
                     "Could not load any tasks for this user."
                     "\nTheir might be no tasks assigned to this user."
                     "\nIt is recommended to check with your admins."
                 )
                 msg.exec()
-                return
-
-            print('Tasks data successfully loaded from the local database')
-            tasks = [Task(
-                project_id=a.projectId,
-                id=a.id,
-                status=a.status,
-                name=a.taskName.title(),
-            ) for a in tasks_df.itertuples()]
-
-        return tasks
+                return False
 
     def __init_data(self):
         self.__load_projects_related_data()
@@ -586,11 +558,7 @@ class MainApp(QMainWindow):
 
         # assign tasks to projects
         for i in range(len(self.projects)):
-            self.projects[i].tasks = utils.id_filter(
-                pid=self.projects[i].id,
-                lst=tasks,
-                compare='pid',
-            )
+            self.projects[i].tasks = list(filter(lambda x: x.project_id == self.projects[i].id, tasks))
 
     def __fill_projects_qlist(self):
         self.projects_list_widget = QListWidget()
@@ -610,110 +578,98 @@ class MainApp(QMainWindow):
 
         self.projects_list_widget.itemClicked.connect(self.__show_project_ui)
 
-        df = db.execute(SQLs.SELECT_DURATIONS_WHERE_USER_AND_DATE.format(
-            user=self.user.id,
-            today=datetime.today().strftime(consts.DAY_TIME_FORMAT)
-        ), conn=MainController.DB_CONNECTION)
-        self.lbl_total_time_tracker.reset(pd.to_timedelta(df.duration).sum())
+        self.load_total_spent_per_day()
+
+    def load_total_spent_per_day(self):
+        durations = MainController.DB_CONNECTION.query(ProjectTimeLine.duration).filter(
+            ProjectTimeLine.user_id == self.user.id and
+            ProjectTimeLine.day_format == datetime.today().strftime(consts.DAY_TIME_FORMAT)
+        ).all()
+        self.lbl_total_time_tracker.reset(sum([i.duration for i in durations], timedelta()))
 
     def __show_project_ui(self, item, ):
         if type(item) is not Project:
             project = item.data(Qt.ItemDataRole.UserRole)
-            print(item.text())
         else:
             # self.active_project = item
             project = item
             self.lbl_active_project.setText(project.name)
+            MainController.store_current_active_project_id(project.id)
 
-        # Collect Durations from the DB
-        df = db.execute(SQLs.SELECT_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE.format(
-            user=self.user.id,
-            project_id=project.id,
-            today=datetime.today().strftime(consts.DAY_TIME_FORMAT)
-        ), conn=MainController.DB_CONNECTION)
-        self.duration = pd.to_timedelta(df.duration).sum()
+        # self.load_spent_per_project_per_day(
+        #   item = item type(item) is Project else project
+        # )
 
-        # if type(item) is db_models.Project:  # if and only if reloaded from remember me
-        #     self.lbl_project_time_tracker.reset(
-        #         self.duration
-        #     )
+        for id in self.tasks_qlist_dict.keys():
+            self.tasks_qlist_dict[id].hide()
 
-        for key in self.tasks_qlist_dict.keys():
-            self.tasks_qlist_dict[key].hide()
+        tasks_qlist_dict_id = ''.join([str(self.user.id), str(project.id)])
+        self.sub_projects_layout.addWidget(self.tasks_qlist_dict[tasks_qlist_dict_id])
+        self.tasks_qlist_dict[tasks_qlist_dict_id].show()
+        self.tasks_qlist_dict[tasks_qlist_dict_id].itemClicked.connect(self.__start_timer)
+        self.tasks_qlist_dict[tasks_qlist_dict_id].itemChanged.connect(self.__pause_timer)
+        # TODO: can we have a work around?
+        self.tasks_qlist_dict[tasks_qlist_dict_id].itemDoubleClicked.connect(self.__pause_timer)
 
-        self.sub_projects_layout.addWidget(self.tasks_qlist_dict[project.id])
-        self.tasks_qlist_dict[project.id].show()
-        self.tasks_qlist_dict[project.id].itemClicked.connect(self.__start_timer)
-        self.tasks_qlist_dict[project.id].itemChanged.connect(self.__pause_timer)
-        self.tasks_qlist_dict[project.id].itemDoubleClicked.connect(self.__pause_timer)
+    def load_spent_per_project_per_day(self, item):  # Not Active
+        durations = MainController.DB_CONNECTION.query(ProjectTimeLine.duration).filter(
+            ProjectTimeLine.user_id == self.user.id and
+            ProjectTimeLine.project_id == item.id and
+            ProjectTimeLine.day_format == datetime.today().strftime(consts.DAY_TIME_FORMAT)
+        ).all()
+        self.duration = sum(durations, timedelta())
+        # self.lbl_project_time_tracker.reset(
+        #     self.duration
+        # )
 
-    def __fill_tasks_qlist_dict(self):
-        for project in self.projects:
-            sub_qlist = QListWidget()
-            sub_qlist.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-            sub_qlist.setSpacing(1)
+    def load_total_durations_per_task_and_day(self, project_id):
+        data = MainController.DB_CONNECTION.query(
+            ProjectTimeLine.task_id,
+            ProjectTimeLine.duration,
+        ).filter(
+            ProjectTimeLine.user_id == self.user.id and
+            ProjectTimeLine.project_id == project_id and
+            ProjectTimeLine.day_format == datetime.today().strftime(consts.DAY_TIME_FORMAT)
+        ).all()
 
-            df = db.execute(
-                SQLs.SELECT_TASKID_AND_DURATION_TIMELINES_WHERE_PROJECT_AND_USER_AND_DATE.format(
-                    user=self.user.id,
-                    project_id=project.id,
-                    today=datetime.today().strftime(consts.DAY_TIME_FORMAT)
-                ), conn=MainController.DB_CONNECTION)
-
-            if not df.empty:
-                df.duration = pd.to_timedelta(df.duration)
-                df.sub_id = pd.to_numeric(df.sub_id)
-                df = df.groupby('sub_id').sum()
-
-            for task in project.tasks:
-
-                timeline = ProjectTimeLine(
-                    project_id=project.id,
-                    sub_id=task.id,
-                    user=self.user.id,
-                )
-                if not df.empty and int(task.id) in df.index.astype(int):
-                    timeline.duration = df.loc[int(task.id), 'duration']
-
-                self.tasks_timers_dict[task.id] = CustomTimer(timeline, )
-
-                self.tasks_timers_dict[task.id].attach(task.id)
-
-                item = QListWidgetItem(sub_qlist)
-                item.setData(Qt.ItemDataRole.UserRole, task)
-                item.setText(task.name)
-                sub_qlist.addItem(item)
-                sub_qlist.setItemWidget(item, self.tasks_timers_dict[task.id])
-                sub_qlist.setStyleSheet(consts.TASKS_LIST_WIDGET_STYLESHEET)
-
-            self.tasks_qlist_dict[project.id] = sub_qlist
-
-        pass
+        if data:
+            return utils.group_by_and_accumulate_timedelta_list_of_tuples(data)
+        else:
+            print(
+                f'Unable to load or find any durations for project {project_id} '
+                f'tasks in {datetime.today().strftime(consts.DAY_TIME_FORMAT)}'
+            )
+            return {}
 
     def __start_timer(self, item):
         # Receive the Task
         task = item.data(Qt.ItemDataRole.UserRole)
-
         # if self.active_task is not None and self.active_project is not None:
         #     if self.active_project.id == task.project_id:
         #         self.duration = self.lbl_project_time_tracker.time
 
+        tasks_timers_dict_id = ''.join([
+            str(self.user.id),
+            str(task.project_id),
+            str(task.id)
+        ])
+
         # Make sure all other timers are paused before activating a new timer
-        for sub_id in self.tasks_timers_dict:
-            if self.tasks_timers_dict[sub_id].flag and task.id != sub_id:
-                self.tasks_timers_dict[sub_id].pause()
+        for id in self.tasks_timers_dict:
+            if self.tasks_timers_dict[id].flag and tasks_timers_dict_id != id:
+                self.tasks_timers_dict[id].pause()
 
         # self.lbl_project_time_tracker.reset(self.duration)
         # self.lbl_project_time_tracker.start()
-        # Activate the Task TimeTracker in the titles grid
-        self.lbl_task_time_tracker.reset(self.tasks_timers_dict[task.id].time)
-        self.lbl_task_time_tracker.start()
 
+        # Activate the Task TimeTracker in the titles grid
+        self.lbl_task_time_tracker.reset(self.tasks_timers_dict[tasks_timers_dict_id].time)
+        self.lbl_task_time_tracker.start()
         self.lbl_total_time_tracker.start()
 
         # Activate the actual timer
-        self.tasks_timers_dict[task.id].start()
-        self.tasks_timers_dict[task.id].show_time(mode='display')
+        self.tasks_timers_dict[tasks_timers_dict_id].start()
+        self.tasks_timers_dict[tasks_timers_dict_id].show_time(mode='display')
 
         # Retrieve the project
         self.active_project = utils.id_filter(
@@ -721,7 +677,6 @@ class MainApp(QMainWindow):
             self.projects
         )[0]
         self.active_task = task
-
         # TODO: Another methodology to track this ?
         ####################################################################
         MainController.CURRENT_ACTIVE_PROJECT_ID = task.project_id
@@ -734,8 +689,13 @@ class MainApp(QMainWindow):
 
     def __pause_timer(self, item):
         task = item.data(Qt.ItemDataRole.UserRole)
-        self.tasks_timers_dict[task.id].pause()
-        self.tasks_timers_dict[task.id].show_time(mode='display')
+        tasks_timers_dict_id = ''.join([
+            str(self.user.id),
+            str(task.project_id),
+            str(task.id)
+        ])
+        self.tasks_timers_dict[tasks_timers_dict_id].pause()
+        self.tasks_timers_dict[tasks_timers_dict_id].show_time(mode='display')
         self.lbl_task_time_tracker.pause()
         self.lbl_total_time_tracker.pause()
         # self.lbl_project_time_tracker.pause()
@@ -748,14 +708,21 @@ class MainApp(QMainWindow):
 
     def __fill_with_last_active_project(self):
         msg = QMessageBox()
-        project = utils.get_me(consts.REMEMBER_LAST_ACTIVE_FILE_PATH)
+        data = utils.get_me(consts.REMEMBER_LAST_ACTIVE_FILE_PATH)
 
-        if project is None or not project.id:
+        if not data:
             msg.setText('Failed to load project as nothing was saved.')
             msg.exec()
             return None
 
-        if not utils.id_filter(project.id, self.projects):
+        project = MainController.DB_CONNECTION.query(Project).filter(
+            Project.id == data['id'] and
+            Project.name == data['name'] and
+            Project.user_id == data['user_id']
+        ).first()
+        print(project)
+
+        if not project:
             msg.setText('Failed to load project as it was removed from the database.')
             msg.exec()
             return None
@@ -765,20 +732,22 @@ class MainApp(QMainWindow):
     def changeEvent(self, event):
         if event.type() == QEvent.Type.WindowStateChange:
             if event.oldState() and Qt.WindowState.WindowMinimized:
-                print("WindowMaximized")
                 self.show()
                 self.floating_bar.hide()
                 self.floating_bar.destroy()
                 self.floating_bar.close()
             elif event.oldState() == Qt.WindowState.WindowNoState or self.windowState() == Qt.WindowState.WindowMaximized:
-                print(self.active_project)
-                print(self.active_task)
 
                 if self.active_task:
                     project = self.active_project.name
                     task = self.active_task.name
-                    time = self.tasks_timers_dict.get(self.active_task.id).time
-                    flag = self.tasks_timers_dict.get(self.active_task.id).flag
+                    tasks_timers_dict_id = ''.join([
+                        str(self.user.id),
+                        str(self.active_task.project_id),
+                        str(self.active_task.id)
+                    ])
+                    time = self.tasks_timers_dict.get(tasks_timers_dict_id).time
+                    flag = self.tasks_timers_dict.get(tasks_timers_dict_id).flag
                 else:
                     project = None
                     task = None
@@ -811,7 +780,8 @@ class FloatingDialogBar(QWidget):
         self.__init_ui()
         self.__init_layouts()
 
-    def greetings(self):  # TODO: implement methodology to stop from the floating dialog
+    def greetings(self):
+        # TODO: implement methodology to stop from the floating dialog
         if self.button.text() == 'Start':
             self.button.setText('Pause')
             self.frame.adjustSize()

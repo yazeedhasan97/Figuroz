@@ -9,9 +9,6 @@ from typing import Union
 import io
 import pandas as pd
 import geocoder
-from PIL import ImageGrab, ImageFilter, Image, ImageFile
-
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from common import consts
 
@@ -23,17 +20,6 @@ from common import consts
 
 
 ConvertibleTimestamp = Union[datetime, str]
-
-
-def read_image(path):
-    return Image.open(path)
-
-
-def convert_image_to_binary(img):
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    byte_im = buf.getvalue()
-    return byte_im
 
 
 def remember_me(user, path):
@@ -63,16 +49,7 @@ def check_if_midnight():
     return seconds_since_midnight == 0
 
 
-def take_screenshot(user_id, directory, blur=False, blur_deep=2, format='%Y-%m-%dT%H:%M:%S'):
-    snapshot = ImageGrab.grab()
-    if blur:
-        snapshot = snapshot.filter(ImageFilter.BoxBlur(blur_deep))
-
-    path = os.path.join(directory, f'{user_id}_{datetime.now().strftime(format)}_image.png')
-    snapshot.save(path, optimize=True, quality=50)
-
-
-def id_filter(pid, lst, compare=None):
+def id_filter(pid, lst, compare=None):  # do we need this ?
     if compare == 'pid':
         return list(filter(lambda x: x.project_id == pid, lst))
     return list(filter(lambda x: x.id == pid, lst))

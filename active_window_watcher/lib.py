@@ -2,7 +2,6 @@ import sys
 from typing import Optional
 
 
-
 def get_current_window_linux() -> Optional[dict]:
     from active_window_watcher import xlib
 
@@ -59,12 +58,13 @@ def get_current_window_windows() -> Optional[dict]:
 
     return {
         "pid": pid,
-        "app": app[:app.rfind('.')].title(),
-        "path": path,
+        "name": app[:app.rfind('.')].title(),
+        "path": path,  # also called window url
         "title": title,
         "version": version,
         "description": '',
         "url": '',
+        "domain_url": '',
     }
 
 

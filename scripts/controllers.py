@@ -1,19 +1,14 @@
 from __future__ import annotations
-import os.path
+
 import platform
 import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-import pandas as pd
 
-from database import models, db
-from common import consts, utils
+from database import db
+from common import consts
 
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-
-from database.models import ProjectTimeLine
 
 from pynput.mouse import Listener as MouseListener
 from pynput.keyboard import Listener as KeyboardListener
@@ -73,9 +68,9 @@ class MainController:
         MainController.SETTINGS = settings
 
     @classmethod
-    def initiate_database_connection(cls, path):
+    def initiate_database_connection(cls, ):
         if MainController.DB_CONNECTION is None:
-            MainController.DB_CONNECTION = db.create_db_connection(path)
+            MainController.DB_CONNECTION = db.create_db_connection()
 
     @classmethod
     def close_database_connection(cls, ):
@@ -150,12 +145,11 @@ class TimerObserver(AbstractObserver):
 
     def create(self, ids: dict) -> None:
         print('Create The Time Line')
-        self._tracker = ProjectTimeLine(
+        from database.models import create_project_time_line
+        self._tracker = create_project_time_line(
             project_id=ids['project_id'],
-            sub_id=ids['sub_id'],
-            user=ids['user'],
-            date_ended=datetime.now(),
-            time_start=datetime.now().time(),
+            task_id=ids['task_id'],
+            user_id=ids['user_id'],
         )
         self._start = datetime.now()  # We need to Fix this
         pass
@@ -165,7 +159,9 @@ class TimerObserver(AbstractObserver):
         self._tracker.duration = datetime.now() - self._start
         print('Updated the Self Duration')
         try:
-            self._tracker.register(MainController.DB_CONNECTION)
+            MainController.DB_CONNECTION.add(self._tracker)
+            MainController.DB_CONNECTION.commit()
+            # self._tracker.register(MainController.DB_CONNECTION)
         except Exception as e:
             print(e)
             raise e
@@ -186,87 +182,14 @@ class ObservedTimer(AbstractObserved):
 
     def notify(self, ids: dict, state='create') -> None:
         """ Notify all observers about an event."""
+        observer_id = ''.join([str(ids['user_id']), str(ids['project_id']), str(ids['task_id'])])
         if state == 'create':
-            self._observers[ids['sub_id']].create(ids)
+            self._observers[observer_id].create(ids)
         elif state == 'update':
-            self._observers[ids['sub_id']].update()
+            self._observers[observer_id].update()
         else:
             pass
         pass
-
-
-class ScreenShotDirectoryHandler(FileSystemEventHandler):
-    @staticmethod
-    def on_created(event, **kwargs):
-        path = event.src_path
-        time.sleep(1)
-        if event.is_directory:
-            return None
-        else:
-            if path.endswith('.png') or path.endswith('.jpg') or path.endswith('.jpeg'):
-                file = os.path.basename(path)
-                screenshot = models.Screenshot(
-                    id=file.split('_')[0] + datetime.now().strftime(consts.ID_TIME_FORMATS),
-                    user=int(file.split('_')[0]),
-                    date=datetime.strptime(file.split('_')[1], consts.IMAGE_DATE_TIME_FORMATS),
-                    screenshot=utils.convert_image_to_binary(utils.read_image(path)),
-                    mouse_move=MainController.MOUSE_MOVE_COUNT,
-                    key_click=MainController.KEYBOARD_KEYS_COUNT,
-                    mouse_clicks=MainController.MOUSE_KEYS_COUNT,
-                    sync=0,
-                )
-                data = utils.create_df_from_object(screenshot)
-
-                try:
-                    data = pd.DataFrame(data, index=[0])
-                    data['date'] = data['date'].astype(str)
-                    MainController.DB_CONNECTION.write(data, 'Screenshot', if_exists='append')
-
-                    MainController.reset_keyboard_keys_count()
-                    MainController.reset_mouse_moves_count()
-                    MainController.reset_mouse_keys_count()
-                    # if os.path.exists(path):
-                    #     os.remove(path)
-                except Exception as e:
-                    print(e)
-            else:
-                pass
-
-
-class ScreenShotDirectoryWatcher:
-    def __init__(self, directory: str, auto_start=False):
-        self.observer = Observer()
-        print("Observing :", directory)
-        self.__directory = directory
-
-        if auto_start:
-            self.run()
-
-    def __get_directory(self):
-        return self.__directory
-
-    def __set_directory(self, directory):
-        self.__directory = directory
-
-    def __del_directory(self, ):
-        self.__directory = None
-
-    directory = property(
-        fset=__set_directory,
-        fget=__get_directory,
-        fdel=__del_directory,
-    )
-
-    def run(self, recursive=False):
-        event_handler = ScreenShotDirectoryHandler()
-        self.observer.schedule(event_handler, self.__directory, recursive=recursive, )
-        self.observer.start()
-        # self.observer.join()  # TODO: More consideration
-        return self
-
-    def stop(self):
-        self.observer.stop()
-        self.observer.join()
 
 
 class InputsObserver:
@@ -291,9 +214,9 @@ class InputsObserver:
             self.start()
 
     def stop(self):
-        self.mouse_listener.join()
-        self.keyboard_listener.join()
+        # self.mouse_listener.join()
         self.mouse_listener.stop()
+        # self.keyboard_listener.join()
         self.keyboard_listener.stop()
 
     def start(self):
