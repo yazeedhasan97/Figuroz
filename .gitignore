@@ -1,0 +1,17 @@
+venv/
+.idea/
+__pycache__/
+*.json
+*.sdf
+*.pdf
+*.pkl
+tests/
+test/
+*.cs
+*.zip
+outer_assets/
+*.png
+*.jpg
+*.jpeg
+*.db
+env/*.db
